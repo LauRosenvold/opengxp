@@ -49,3 +49,10 @@
   when:
     - ssh_remove_weak_moduli | bool
     - ssh_weak_moduli.stdout | default('') | length > 0
+  changed_when: true
+  # Already effectively idempotent via the `when:` guard above (only
+  # runs when the preceding read-only check found weak moduli, so a
+  # re-run against an already-cleaned file skips this entirely) —
+  # explicit changed_when here just makes that accurate on the one run
+  # where it does execute, rather than relying on the shell module's
+  # own default.

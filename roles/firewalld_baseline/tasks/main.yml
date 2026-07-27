@@ -28,6 +28,10 @@
 - name: Log denied packets for audit visibility
   ansible.builtin.command: "firewall-cmd --set-log-denied={{ firewalld_log_denied }}"
   when: firewalld_current_log_denied.stdout | trim != firewalld_log_denied
+  changed_when: true
+  # Guarded by the preceding read-only check, so a re-run with the
+  # setting already correct skips this entirely — explicit changed_when
+  # just makes the one run that does execute accurately reported.
 
 - name: Allow SSH on its configured port
   ansible.posix.firewalld:

@@ -18,7 +18,19 @@ evidence generation, and pluggable workload-enablement layers (Docker,
 Kubernetes, PostgreSQL) and application deployments (NetBox, a private
 registry) on top — so building and validating a new regulated host is a
 matter of adding it to inventory and running a playbook, not
-re-authoring the control baseline from scratch.
+re-authoring the control baseline from scratch. Every role and playbook
+here is written to be idempotent — re-running any of them against an
+already-converged host changes nothing and reports no changes, which is
+what makes `hardening.yml`'s scheduled re-runs and a periodic-review
+`--check --diff` (see [docs/VALIDATION.md](docs/VALIDATION.md))
+meaningful evidence of drift rather than noise. This is enforced by
+convention, not hope: every `command`/`shell` task either reports
+`changed_when: false` (a read-only check) or is guarded behind a
+`when:` condition that only fires when real work remains, so a clean
+second run touches nothing — and `molecule/ssh_hardening` (the pattern
+documented there to replicate for every other role) runs an automated
+`idempotence` step that fails CI outright if a second `converge` reports
+any change at all.
 
 This repo handles the **technical control** layer of computerized system
 validation — it does not replace the procedural controls (change control
