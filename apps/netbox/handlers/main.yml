@@ -1,0 +1,12 @@
+---
+- name: Restart nginx container
+  ansible.builtin.command: >
+    docker compose -f {{ netbox_app_dir }}/docker-compose.yml restart nginx
+  args:
+    chdir: "{{ netbox_app_dir }}"
+  changed_when: true
+  # nginx.conf and the TLS cert/key are bind-mounted file content, not
+  # part of the compose service definition itself — `docker compose up
+  # -d` (tasks/compose.yml) has no visibility into that and won't pick up
+  # a plain content change on its own, unlike everything else in the
+  # stack.

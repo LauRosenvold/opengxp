@@ -1,0 +1,24 @@
+# {{ ansible_managed | default('Managed by Ansible — roles/logging_forward') }}
+# Forward all logs to the central log/SIEM target over TLS. Disk-assisted
+# queueing means a network outage buffers locally rather than losing
+# audit-relevant events.
+
+global(
+  DefaultNetstreamDriverCAFile="/etc/pki/tls/certs/gxp-log-forward-ca.pem"
+)
+
+action(
+  type="omfwd"
+  target="{{ syslog_forward_target }}"
+  port="{{ syslog_forward_port }}"
+  protocol="tcp"
+  StreamDriver="gtls"
+  StreamDriverMode="1"
+  StreamDriverAuthMode="x509/name"
+  action.resumeRetryCount="{{ logging_forward_resume_retry_count }}"
+  queue.type="LinkedList"
+  queue.filename="gxp_forward_q"
+  queue.maxdiskspace="{{ logging_forward_queue_max_disk_space }}"
+  queue.saveonshutdown="on"
+  queue.spoolDirectory="{{ logging_forward_queue_dir }}"
+)

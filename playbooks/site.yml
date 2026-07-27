@@ -1,0 +1,29 @@
+---
+# Full build: bootstrap -> hardening -> compliance evidence.
+# patch_management.yml is intentionally NOT included here — patching runs
+# on its own change-controlled schedule (see playbooks/patch_management.yml).
+#
+# playbooks/provision_automation_user.yml is ALSO intentionally not
+# included here — it's a one-time, per-host cold-start step that connects
+# as a different (initial admin) account, run separately before this
+# playbook ever sees a given host. See that file's header comment.
+#
+# playbooks/docker_host.yml, playbooks/kubernetes_cluster.yml /
+# kubernetes_upgrade.yml, and playbooks/postgresql_server.yml are ALSO
+# intentionally not included here — all workload enablement
+# (server_roles/, not roles/), run separately against their own inventory
+# groups once a host is already hardened. See docs/SERVER_ROLES.md.
+#
+# playbooks/netbox.yml and playbooks/registry.yml are intentionally not
+# included here either — application deployments (apps/, a third tier
+# below server_roles/) that additionally assume playbooks/docker_host.yml
+# has already run against the same host. See docs/APPS.md.
+
+- name: Full build - bootstrap
+  ansible.builtin.import_playbook: bootstrap.yml
+
+- name: Full build - hardening
+  ansible.builtin.import_playbook: hardening.yml
+
+- name: Full build - compliance evidence
+  ansible.builtin.import_playbook: compliance_scan.yml

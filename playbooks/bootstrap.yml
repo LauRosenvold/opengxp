@@ -1,0 +1,34 @@
+---
+# Day-0 bootstrap: gets a freshly provisioned host onto content
+# management and to a sane baseline before any hardening role touches it.
+# Run this once per host (idempotent to re-run, but it's meant to be the
+# "day 0" playbook, not part of the routine hardening cadence).
+#
+# Assumes playbooks/provision_automation_user.yml has already run against
+# this host — this play connects as the normal automation_user_name over
+# SSH key auth like every other playbook here, NOT as root or any initial
+# admin account. automation_user is still listed first below (idempotent,
+# reconciles sudoers/authorized_keys drift on every run) even though it
+# can't bootstrap a host from nothing — that's what
+# provision_automation_user.yml is for.
+
+- name: Bootstrap newly provisioned RHEL hosts
+  # !hyperv_hosts: that group (see docs/PROVISIONING.md) is Windows,
+  # connected via WinRM — none of this play's SSH/sudo/RPM/systemd
+  # assumptions apply to it, and it isn't a "hardened RHEL host" this
+  # repo's roles/ baseline is meant for in the first place. !localhost:
+  # the explicit inventory entry used by playbooks/provision_vm_vcenter.yml
+  # (see docs/PROVISIONING.md) — that's the Ansible control node, not a
+  # managed RHEL host either.
+  hosts: all:!hyperv_hosts:!localhost
+  become: true
+  serial: "20%"
+  max_fail_percentage: 10
+
+  roles:
+    - role: automation_user
+      tags: [bootstrap, automation-user]
+    - role: satellite_registration
+      tags: [bootstrap, satellite]
+    - role: common
+      tags: [bootstrap, common]

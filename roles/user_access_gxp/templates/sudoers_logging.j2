@@ -1,0 +1,15 @@
+# {{ ansible_managed | default('Managed by Ansible — roles/user_access_gxp') }}
+Defaults use_pty
+Defaults logfile="{{ user_access_sudo_logfile }}"
+{% if user_access_sudo_log_input %}
+Defaults log_input
+{% endif %}
+{% if user_access_sudo_log_output %}
+Defaults log_output
+Defaults iolog_dir="{{ user_access_sudo_iolog_dir }}"
+{% endif %}
+Defaults passwd_tries={{ user_access_sudo_passwd_tries }}
+Defaults timestamp_timeout={{ user_access_sudo_timestamp_timeout }}
+Defaults !visiblepw
+Defaults always_set_home
+Defaults env_reset

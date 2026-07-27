@@ -1,0 +1,33 @@
+---
+# Creates (or decommissions) a VM from an exported Hyper-V template VM —
+# see docs/PROVISIONING.md. Runs against the Hyper-V host itself
+# (`hyperv_hosts` inventory group, WinRM) — the new VM doesn't exist for
+# Ansible to reach directly until this finishes and it's booted.
+#
+# Requires pywinrm on the control node (pip install "pywinrm>=0.3.0") —
+# see requirements.yml's note on ansible.windows.
+#
+# --limit is not optional in practice: `hyperv_hosts` may contain more
+# than one Hyper-V host/cluster, and this creates the VM on whichever
+# host(s) the play actually targets.
+#
+# Usage:
+#   ansible-playbook playbooks/provision_vm_hyperv.yml \
+#     -i inventories/staging/hosts.yml --limit hyperv01.gxp.example.internal \
+#     -e vm_name=app07 \
+#     -e hyperv_template_export_path='D:\HyperV\Templates\rhel9-golden'
+#
+# Decommission:
+#   ansible-playbook playbooks/provision_vm_hyperv.yml \
+#     -i inventories/staging/hosts.yml --limit hyperv01.gxp.example.internal \
+#     -e vm_name=app07 -e vm_state=absent
+
+- name: Provision a VM from a Hyper-V template
+  hosts: hyperv_hosts
+  gather_facts: false
+  vars:
+    provisioning_hypervisor: hyperv
+
+  roles:
+    - role: vm_provision
+      tags: [provision, hyperv]

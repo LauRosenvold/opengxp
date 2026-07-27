@@ -1,0 +1,33 @@
+---
+# This role is a dispatcher, not an implementation. It exists so
+# playbooks/hardening.yml can say "run cis_hardening" once and get the
+# right engine for whichever major version the host is, instead of every
+# playbook needing `when: ansible_distribution_major_version == ...`
+# logic scattered through it. See docs/BASELINE_MAPPING.md for what each
+# engine actually covers.
+
+- name: Assert a supported CIS hardening engine is selected
+  ansible.builtin.assert:
+    that:
+      - cis_hardening_engine in ['lockdown_role', 'fallback_role']
+      - cis_hardening_role_name is defined
+      - cis_hardening_role_name | length > 0
+    fail_msg: >-
+      cis_hardening_engine must be 'lockdown_role' or 'fallback_role'
+      (got '{{ cis_hardening_engine }}'), set per-OS in
+      inventories/<env>/group_vars/rhel9.yml / rhel10.yml / almalinux10.yml.
+
+- name: Warn when running the EL10 fallback (temporary state, not the target state)
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }} is using el10_baseline_hardening because
+      no tagged, stable CIS automation role exists for this OS yet (RHEL10:
+      ansible-lockdown.RHEL10-CIS isn't GA; AlmaLinux 10: no dedicated CIS
+      role exists at all — see requirements.yml and
+      docs/BASELINE_MAPPING.md). This is expected to be temporary for RHEL —
+      periodic review should check whether upstream is ready to replace it.
+  when: cis_hardening_engine == 'fallback_role'
+
+- name: Dispatch to the configured CIS hardening engine
+  ansible.builtin.include_role:
+    name: "{{ cis_hardening_role_name }}"

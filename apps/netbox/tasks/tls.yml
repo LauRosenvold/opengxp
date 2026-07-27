@@ -1,0 +1,77 @@
+---
+- name: Ensure the TLS directory exists
+  ansible.builtin.file:
+    path: "{{ netbox_tls_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Deploy a real TLS certificate and key, if supplied
+  ansible.builtin.copy:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - { src: "{{ netbox_ssl_cert_src }}", dest: "{{ netbox_tls_dir }}/server.crt" }
+    - { src: "{{ netbox_ssl_key_src }}", dest: "{{ netbox_tls_dir }}/server.key" }
+  loop_control:
+    label: "{{ item.dest }}"
+  when:
+    - netbox_ssl_cert_src | length > 0
+    - netbox_ssl_key_src | length > 0
+  notify: Restart nginx container
+  # Both cert and key end up world-readable (0644), unlike
+  # server_roles/postgresql_server's 0600 key: the nginx reverse-proxy
+  # container reads this file across a bind mount as its own internal
+  # non-root UID (not necessarily the same UID as netbox/postgres/redis's
+  # containers), and bind mounts don't remap ownership — matching group
+  # ownership to a specific container's GID would be more precise but
+  # this role doesn't pin nginx-unprivileged's exact GID as a contract.
+  # The trade-off: any local user on the docker host can read the private
+  # key, same as they already could touch anything else on this host —
+  # this repo's other host-level controls (roles/user_access_gxp,
+  # roles/auditd_gxp) are what actually gate that, not file mode alone.
+
+- name: Check whether a self-signed certificate already exists
+  ansible.builtin.stat:
+    path: "{{ netbox_tls_dir }}/server.crt"
+  register: netbox_selfsigned_cert_stat
+  when: netbox_ssl_cert_src | length == 0
+
+- name: Warn that a self-signed certificate is being generated
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: netbox_ssl_cert_src/key_src are empty on
+      {{ inventory_hostname }} — generating a self-signed certificate.
+      Fine for lab/staging, NOT approved for a real GxP production
+      NetBox instance. Point those vars at a real CA-issued cert/key once
+      you have one — see docs/APPS.md.
+  when:
+    - netbox_ssl_cert_src | length == 0
+    - not netbox_selfsigned_cert_stat.stat.exists
+
+- name: Generate a self-signed certificate and key
+  ansible.builtin.command: >
+    openssl req -new -x509 -days {{ netbox_ssl_self_signed_days }}
+    -nodes -text
+    -out {{ netbox_tls_dir }}/server.crt
+    -keyout {{ netbox_tls_dir }}/server.key
+    -subj "/CN={{ netbox_allowed_hosts[0] }}"
+  when:
+    - netbox_ssl_cert_src | length == 0
+    - not netbox_selfsigned_cert_stat.stat.exists
+  changed_when: true
+  notify: Restart nginx container
+
+- name: Ensure correct ownership/permissions on the certificate and key
+  ansible.builtin.file:
+    path: "{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - "{{ netbox_tls_dir }}/server.crt"
+    - "{{ netbox_tls_dir }}/server.key"

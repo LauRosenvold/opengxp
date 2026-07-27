@@ -1,0 +1,55 @@
+---
+# Runs against the whole k8s_control_plane group; every task is guarded
+# to hosts OTHER than the first one, which control_plane_init.yml already
+# handled. Only meaningful when groups['k8s_control_plane'] has more than
+# one member (an HA control plane) — a no-op group of tasks otherwise.
+
+- name: Check whether this control-plane node has already joined
+  ansible.builtin.stat:
+    path: /etc/kubernetes/admin.conf
+  register: k8s_cp_join_stat
+  when: inventory_hostname != (groups['k8s_control_plane'] | first)
+
+- name: Fail loudly if there's no control-plane endpoint configured for an HA control plane
+  ansible.builtin.assert:
+    that:
+      - k8s_control_plane_endpoint | length > 0
+    fail_msg: >-
+      groups['k8s_control_plane'] has more than one host but
+      k8s_control_plane_endpoint is empty. An HA control plane needs a
+      stable endpoint in front of all control-plane nodes (an external
+      LB/VIP you provide — see docs/SERVER_ROLES.md); joining additional
+      control-plane nodes against a single node's own IP would build an
+      inconsistent cluster.
+  when:
+    - groups['k8s_control_plane'] | length > 1
+    - inventory_hostname != (groups['k8s_control_plane'] | first)
+    - not k8s_cp_join_stat.stat.exists
+
+- name: Join as an additional control-plane node
+  ansible.builtin.command: >
+    {{ hostvars[groups['k8s_control_plane'] | first].k8s_worker_join_command }}
+    --control-plane
+    --certificate-key {{ hostvars[groups['k8s_control_plane'] | first].k8s_certificate_key }}
+    --apiserver-advertise-address {{ ansible_default_ipv4.address }}
+  when:
+    - inventory_hostname != (groups['k8s_control_plane'] | first)
+    - not k8s_cp_join_stat.stat.exists
+  changed_when: true
+
+- name: Deploy the default kubeconfig for the automation account on this control-plane node too
+  ansible.builtin.file:
+    path: "{{ automation_user_home | default('/root') }}/.kube"
+    state: directory
+    owner: "{{ automation_user_name | default('root') }}"
+    group: "{{ automation_user_name | default('root') }}"
+    mode: "0700"
+  when: inventory_hostname != (groups['k8s_control_plane'] | first)
+
+- name: Symlink admin.conf for kubectl convenience on this control-plane node too
+  ansible.builtin.file:
+    src: /etc/kubernetes/admin.conf
+    dest: "{{ automation_user_home | default('/root') }}/.kube/config"
+    state: link
+    force: true
+  when: inventory_hostname != (groups['k8s_control_plane'] | first)

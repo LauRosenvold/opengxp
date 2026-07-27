@@ -1,0 +1,65 @@
+---
+- name: Install baseline packages
+  ansible.builtin.dnf:
+    name: "{{ common_packages }}"
+    state: present
+  register: common_pkg_install
+  retries: 3
+  delay: 10
+  until: common_pkg_install is succeeded
+
+- name: Set system hostname to inventory FQDN
+  ansible.builtin.hostname:
+    name: "{{ inventory_hostname }}"
+
+- name: Ensure hostname resolves to itself in /etc/hosts (loopback line)
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    regexp: '^127\.0\.0\.1\s'
+    line: "127.0.0.1   localhost localhost.localdomain {{ inventory_hostname_short }}"
+    state: present
+
+- name: Set timezone
+  community.general.timezone:
+    name: "{{ common_timezone }}"
+
+- name: Ensure required locale is generated
+  ansible.builtin.command: localedef -f UTF-8 -i {{ common_locale.split('.')[0] }} {{ common_locale }}
+  args:
+    creates: "/usr/lib/locale/{{ common_locale }}"
+  when: common_locale is defined
+
+- name: Set default system locale
+  ansible.builtin.copy:
+    dest: /etc/locale.conf
+    content: "LANG={{ common_locale }}\n"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Mask ctrl-alt-del.target (CIS 1.2.x — prevent unauthorized reboot from console)
+  ansible.builtin.systemd:
+    name: ctrl-alt-del.target
+    masked: true
+  when: common_disable_ctrl_alt_del | bool
+
+- name: Deploy informational MOTD (post-login, not a legal banner)
+  ansible.builtin.template:
+    src: motd.j2
+    dest: /etc/motd
+    owner: root
+    group: root
+    mode: "0644"
+  when: common_motd_managed | bool
+
+- name: Deploy legal/compliance login banner (pre-auth, console + remote)
+  ansible.builtin.template:
+    src: issue.j2
+    dest: "{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - /etc/issue
+    - /etc/issue.net
+  when: common_issue_banner_managed | bool

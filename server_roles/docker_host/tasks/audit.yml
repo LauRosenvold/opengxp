@@ -1,0 +1,15 @@
+---
+- name: Deploy Docker-specific audit rules
+  ansible.builtin.template:
+    src: docker.rules.j2
+    dest: /etc/audit/rules.d/docker.rules
+    owner: root
+    group: root
+    mode: "0640"
+  notify: Load docker audit rules
+
+- name: Ensure auditd is enabled and running
+  ansible.builtin.systemd:
+    name: auditd
+    state: started
+    enabled: true

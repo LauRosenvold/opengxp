@@ -1,0 +1,183 @@
+---
+# Vanilla (kubeadm) Kubernetes node setup — control-plane and worker
+# nodes both run this role; behavior branches on inventory group
+# membership (`k8s_control_plane` vs `k8s_workers`), not a separate var,
+# so there's one thing to keep in sync rather than two. Container runtime
+# (containerd/CRI-O) and CNI (Calico/Flannel) are both pluggable — see the
+# respective sections below. See docs/SERVER_ROLES.md for the operational
+# caveats (SELinux stays enforcing regardless of runtime choice, HA-LB is
+# bring-your-own, MetalLB is L2-mode-only, versionlock interaction with
+# roles/patch_management, audit/encryption-at-rest, the upgrade path).
+
+# --- Version -----------------------------------------------------------------
+# pkgs.k8s.io repos are per MINOR version (v1.30, v1.31, ...) — there is
+# no single "latest" repo. This is also what "multiple versions" support
+# in this role means in practice: set k8s_version per inventory group (or
+# per-host in host_vars) to run different minor versions on different
+# node pools during a staged upgrade, and use
+# playbooks/kubernetes_upgrade.yml to move a pool from one to the next.
+k8s_version: "1.31"                # minor version only, selects the repo
+k8s_package_version: ""             # exact NEVRA suffix (e.g. "1.31.4-*"); empty = latest patch in that minor's repo
+
+# roles/patch_management runs a fleet-wide `dnf update *` on its own
+# schedule (see playbooks/patch_management.yml). Kubernetes version
+# changes must be a deliberate, tested, ticketed action (kubeadm doesn't
+# tolerate an unplanned kubelet/kubeadm/control-plane skew) — versionlock
+# keeps routine patching from ever touching these three packages, even
+# though the pkgs.k8s.io repo structure itself already prevents crossing
+# a MINOR version boundary by accident.
+k8s_versionlock_enabled: true
+
+# --- Package source ------------------------------------------------------------
+# Same Satellite-first posture as server_roles/docker_host: sync
+# pkgs.k8s.io and Docker's containerd.io repo into Satellite custom
+# products/content views for a real estate; the public URLs below are the
+# fallback for lab/evaluation use, or for an environment that
+# intentionally doesn't route this OS group through Satellite.
+k8s_repo_baseurl: "CHANGEME"    # e.g. https://satellite.gxp.example.internal/pulp/repos/GxP-Enterprise/production/kubernetes-v1.31
+k8s_repo_gpgkey: "CHANGEME"     # e.g. https://satellite.gxp.example.internal/pub/RPM-GPG-KEY-kubernetes
+k8s_public_repo_baseurl: "https://pkgs.k8s.io/core:/stable:/v{{ k8s_version }}/rpm/"
+k8s_public_repo_gpgkey: "https://pkgs.k8s.io/core:/stable:/v{{ k8s_version }}/rpm/repodata/repomd.xml.key"
+
+containerd_repo_baseurl: "CHANGEME"   # Satellite-hosted mirror of Docker's containerd.io repo
+containerd_repo_gpgkey: "CHANGEME"
+containerd_public_repo_url_by_distro:
+  RedHat: "https://download.docker.com/linux/rhel/docker-ce.repo"
+  AlmaLinux: "https://download.docker.com/linux/centos/docker-ce.repo"
+
+# CRI-O's packaging moved to openSUSE's Build Service, versioned per
+# Kubernetes minor version like pkgs.k8s.io — verify this URL pattern
+# against the current CRI-O install docs before relying on it, packaging
+# locations for this project have moved before and may again.
+crio_repo_baseurl: "CHANGEME"   # Satellite-hosted mirror
+crio_repo_gpgkey: "CHANGEME"
+crio_public_repo_baseurl: "https://download.opensuse.org/repositories/isv:/cri-o:/v{{ k8s_version }}/rpm/"
+crio_public_repo_gpgkey: "https://download.opensuse.org/repositories/isv:/cri-o:/v{{ k8s_version }}/rpm/repodata/repomd.xml.key"
+
+# --- Container runtime ---------------------------------------------------------
+# CRI-O is the runtime OpenShift itself uses and has mature SELinux
+# integration — a reasonable alternative to containerd on a GxP estate
+# that already keeps SELinux enforcing everywhere (see
+# roles/selinux_enforce). Both are "vanilla kubeadm compatible"; this is
+# purely an operator choice, not a hardening recommendation one way or
+# the other.
+k8s_container_runtime: containerd   # containerd | crio
+
+k8s_container_runtime_endpoint_by_runtime:
+  containerd: "unix:///var/run/containerd/containerd.sock"
+  crio: "unix:///var/run/crio/crio.sock"
+k8s_container_runtime_endpoint: "{{ k8s_container_runtime_endpoint_by_runtime[k8s_container_runtime] }}"
+
+k8s_pause_image: "registry.k8s.io/pause:3.10"   # used by whichever runtime is selected
+
+crio_cgroup_manager: systemd   # MUST match the kubelet's cgroup driver, same reasoning as containerd's SystemdCgroup
+crio_log_level: info
+
+# --- Cluster topology -----------------------------------------------------------
+# Default pod CIDR follows whichever CNI provider is selected below —
+# Calico and Flannel ship different defaults in their own reference
+# manifests, and tasks/cni.yml patches the fetched manifest to match
+# whatever this resolves to (see the CNI section's fragility caveat
+# below). Override k8s_pod_network_cidr directly if you need a specific
+# range regardless of provider default.
+k8s_pod_network_cidr_by_provider:
+  calico: "192.168.0.0/16"
+  flannel: "10.244.0.0/16"
+k8s_pod_network_cidr: "{{ k8s_pod_network_cidr_by_provider[k8s_cni_provider] }}"
+
+k8s_service_cidr: "10.96.0.0/12"            # kubeadm's default
+# Empty = single control-plane node, apiserver reachable directly at that
+# node's IP:6443. For an HA control plane (multiple k8s_control_plane
+# hosts), this MUST be set to a stable endpoint in front of all of them —
+# an external LB/VIP you provide (HAProxy+keepalived, F5, cloud LB...).
+# This role does not stand up that load balancer — see docs/SERVER_ROLES.md.
+k8s_control_plane_endpoint: ""
+k8s_apiserver_bind_port: 6443
+
+k8s_upload_certs: true   # required for additional control-plane nodes to join automatically
+
+# --- CNI -------------------------------------------------------------------------
+# kubeadm deliberately ships no CNI — pick one. Calico (NetworkPolicy
+# support, common enterprise choice) and Flannel (simpler, VXLAN overlay
+# only, no NetworkPolicy enforcement) are both wired up here; set
+# k8s_cni_enabled: false and BYO if your org standardizes on something
+# else (Cilium, etc.) — applying it is then a manual step or a separate
+# role, not this one's job.
+k8s_cni_enabled: true
+k8s_cni_provider: calico   # calico | flannel
+
+# Version-pinned manifest per provider — bump deliberately, never float
+# on a `master`/`latest` URL. tasks/cni.yml fetches whichever one is
+# selected and patches its pod-CIDR value to match k8s_pod_network_cidr
+# before applying (see that file's own fragility caveat for Calico
+# specifically — Flannel's ConfigMap is a clean string substitution,
+# Calico's requires uncommenting a block and is best-effort against
+# whatever manifest format the pinned tag below actually ships).
+k8s_cni_manifest_url_by_provider:
+  calico: "https://raw.githubusercontent.com/projectcalico/calico/v3.28.0/manifests/calico.yaml"
+  flannel: "https://github.com/flannel-io/flannel/releases/download/v0.25.5/kube-flannel.yml"
+k8s_cni_manifest_url: "{{ k8s_cni_manifest_url_by_provider[k8s_cni_provider] }}"
+
+# --- MetalLB (bare-metal LoadBalancer-type Service support) -------------------
+# Off by default — needs real IP ranges from your network that this role
+# has no way to guess. When enabled, only L2 (ARP/NDP) advertisement mode
+# is wired up: no BGP router configuration required, works on any flat
+# L2 network, which is the common case for an on-prem estate. BGP mode is
+# a documented gap, not implemented here — see docs/SERVER_ROLES.md.
+k8s_metallb_enabled: false
+k8s_metallb_manifest_url: "https://raw.githubusercontent.com/metallb/metallb/v0.14.8/config/manifests/metallb-native.yaml"
+k8s_metallb_address_pools: []
+# Example:
+#   - "10.20.30.100-10.20.30.150"   # CHANGEME — a range not handed out by your DHCP/other infra
+#   - "10.20.31.0/24"               # or a CIDR — either form metallb's IPAddressPool accepts
+
+# --- Node prep -------------------------------------------------------------------
+k8s_disable_swap: true   # kubelet requires this unless you've deliberately enabled the NodeSwap feature gate, which this role doesn't configure
+
+# --- API server / controller-manager / scheduler hardening (CIS Kubernetes
+# Benchmark-aligned; re-review against the current benchmark before
+# relying on this verbatim, same caveat as roles/ssh_hardening's cipher list) --
+k8s_apiserver_extra_args:
+  anonymous-auth: "false"
+  profiling: "false"
+  service-account-lookup: "true"
+  tls-min-version: "VersionTLS12"
+  enable-admission-plugins: "NodeRestriction"
+  audit-log-path: "/var/log/kubernetes/audit/audit.log"
+  audit-log-maxage: "30"
+  audit-log-maxbackup: "10"
+  audit-log-maxsize: "100"
+  audit-policy-file: "/etc/kubernetes/audit-policy.yaml"
+
+k8s_controller_manager_extra_args:
+  profiling: "false"
+  terminated-pod-gc-threshold: "50"
+  use-service-account-credentials: "true"
+
+k8s_scheduler_extra_args:
+  profiling: "false"
+
+# KubeletConfiguration fields (not extraArgs — kubeadm's kubelet config
+# is a structured object, see templates/kubeadm-config.yaml.j2)
+k8s_kubelet_protect_kernel_defaults: true
+k8s_kubelet_read_only_port: 0
+k8s_kubelet_event_record_qps: 5
+k8s_kubelet_streaming_connection_idle_timeout: "4h0m0s"
+k8s_kubelet_rotate_certificates: true
+k8s_kubelet_server_tls_bootstrap: true
+
+# --- Encryption at rest (etcd Secrets) -------------------------------------------
+# Off by default — needs a real 32-byte base64 key, supplied via an
+# ansible-vault encrypted group_vars/*.vault.yml, never here in plaintext.
+# Strongly recommended to turn on for any gxp_critical Kubernetes cluster
+# storing GxP-relevant data in Secrets.
+k8s_encryption_at_rest_enabled: false
+k8s_encryption_at_rest_key: ""
+
+# --- Upgrade gate ------------------------------------------------------------
+# See playbooks/kubernetes_upgrade.yml and tasks/upgrade.yml — same
+# "explicit confirmation extra-var" pattern as roles/fips_mode's
+# allow_fips_transition, because a kubeadm upgrade is exactly the kind of
+# disruptive, change-controlled action that should never happen as a
+# side effect of a routine run.
+k8s_upgrade_confirmed: false

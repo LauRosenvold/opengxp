@@ -1,0 +1,44 @@
+# {{ ansible_managed | default('Managed by Ansible — apps/registry') }}
+
+services:
+  registry:
+    image: {{ registry_image }}
+    networks:
+      default:
+        # Lets registry-ui (and anything else on this network) reach the
+        # registry AS registry_hostname — matching the TLS cert's CN, so
+        # internal container-to-container calls don't hit a hostname
+        # mismatch the way they would connecting to the plain service
+        # name "registry" instead.
+        aliases:
+          - {{ registry_hostname }}
+    ports:
+      - "{{ registry_https_port }}:5000"
+    volumes:
+      - {{ registry_app_dir }}/config.yml:/etc/docker/registry/config.yml:ro
+      - {{ registry_storage_dir }}:/var/lib/registry:rw
+      - {{ registry_app_dir }}/auth:/auth:ro
+      - {{ registry_tls_dir }}:/tls:ro
+    restart: unless-stopped
+    # No healthcheck: registry:2's image is a minimal, mostly-scratch
+    # base with just the registry binary — no shell/wget/curl available
+    # for a CMD-style healthcheck to run.
+
+{% if registry_ui_enabled %}
+  registry-ui:
+    image: {{ registry_ui_image }}
+    depends_on:
+      - registry
+    environment:
+      SINGLE_REGISTRY: "true"
+      REGISTRY_TITLE: "{{ registry_hostname }}"
+      NGINX_PROXY_PASS_URL: "https://{{ registry_hostname }}:5000"
+      SHOW_CATALOG_NB_TAGS: "true"
+    ports:
+      - "{{ registry_ui_bind_address }}:{{ registry_ui_port }}:80"
+    restart: unless-stopped
+{% endif %}
+
+networks:
+  default:
+    name: registry

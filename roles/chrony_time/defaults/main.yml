@@ -1,0 +1,10 @@
+---
+# ntp_servers comes from inventories/<env>/group_vars/all.yml. Fallback
+# below only matters if that var is somehow missing — it should always be
+# overridden with your real stratum sources.
+chrony_ntp_servers: "{{ ntp_servers | default(['ntp1.example.internal', 'ntp2.example.internal']) }}"
+
+chrony_makestep_threshold: "1.0"
+chrony_makestep_limit: 3          # only step the clock for the first 3 updates after startup, then only slew
+chrony_rtcsync: true
+chrony_driftfile: /var/lib/chrony/drift

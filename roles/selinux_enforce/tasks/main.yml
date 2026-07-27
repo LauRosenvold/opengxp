@@ -1,0 +1,73 @@
+---
+- name: Check current SELinux status
+  ansible.builtin.command: getenforce
+  register: selinux_current_status
+  changed_when: false
+
+- name: Fail hard if SELinux is currently disabled and we're not allowed to proceed quietly
+  ansible.builtin.fail:
+    msg: >-
+      SELinux is disabled on {{ inventory_hostname }}. Setting it to
+      enforcing from disabled requires relabeling the entire filesystem on
+      next boot (autorelabel), which is slow and must happen in a
+      maintenance window — this is NOT done automatically inline. Set
+      config, schedule a reboot with autorelabel, verify with
+      compliance_scan.yml afterward, then re-run this role.
+  when:
+    - selinux_current_status.stdout == 'Disabled'
+    - selinux_fail_hard_if_disabled | bool
+    - selinux_state != 'disabled'
+
+- name: Set SELinux state and policy in /etc/selinux/config
+  ansible.posix.selinux:
+    state: "{{ selinux_state }}"
+    policy: "{{ selinux_policy }}"
+  register: selinux_config_result
+
+- name: Force filesystem relabel on next boot if SELinux was just enabled from disabled
+  ansible.builtin.file:
+    path: /.autorelabel
+    state: touch
+    mode: "0644"
+  when:
+    - selinux_current_status.stdout == 'Disabled'
+    - selinux_state != 'disabled'
+
+- name: Warn that a reboot is required to complete the transition out of disabled
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: {{ inventory_hostname }} was SELinux-disabled and has now
+      been configured for {{ selinux_state }}, but this will not take
+      effect (and will trigger a full filesystem relabel) until the next
+      reboot. Schedule this as a change-controlled maintenance action.
+  when:
+    - selinux_current_status.stdout == 'Disabled'
+    - selinux_state != 'disabled'
+
+- name: Apply SELinux booleans
+  ansible.posix.seboolean:
+    name: "{{ item.name }}"
+    state: "{{ item.state }}"
+    persistent: true
+  loop: "{{ selinux_booleans }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when:
+    - selinux_current_status.stdout != 'Disabled'
+
+- name: Re-check SELinux status after applying config (module flips runtime state too, except disabled<->enabled)
+  ansible.builtin.command: getenforce
+  register: selinux_status_after
+  changed_when: false
+
+- name: Verify SELinux is actually enforcing right now (when not freshly transitioned from disabled)
+  ansible.builtin.assert:
+    that:
+      - selinux_status_after.stdout == 'Enforcing' or selinux_current_status.stdout == 'Disabled'
+    fail_msg: >-
+      SELinux is in Permissive mode on {{ inventory_hostname }}, not
+      Enforcing. selinux_state is set correctly for the next boot, but the
+      running system is out of compliance right now — this is a finding
+      for compliance_scan.yml to pick up until the host is rebooted or
+      `setenforce 1` is applied.
+  when: selinux_state == 'enforcing'

@@ -1,0 +1,11 @@
+---
+selinux_state: enforcing        # enforcing | permissive | disabled — GxP estate should never ship "disabled"
+selinux_policy: targeted
+selinux_fail_hard_if_disabled: true   # refuse to silently proceed if a host is currently disabled (needs a reboot to fix)
+
+# Booleans to set explicitly. Keep this list justified per entry — every
+# boolean flipped on is a documented, intentional exception to policy
+# defaults and should be traceable to the app/service that needed it.
+selinux_booleans: []
+# Example:
+#   - { name: httpd_can_network_connect_db, state: true }

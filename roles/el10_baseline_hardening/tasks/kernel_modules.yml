@@ -1,0 +1,9 @@
+---
+- name: Deploy modprobe blacklist for uncommon network protocol modules
+  ansible.builtin.template:
+    src: modprobe_net.conf.j2
+    dest: /etc/modprobe.d/cis-net-protocols-blacklist.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Rebuild initramfs

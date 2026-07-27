@@ -1,0 +1,42 @@
+---
+# Order matters, same principle as server_roles/kubernetes_node's
+# tasks/main.yml: data directory must exist (via initdb or pg_basebackup)
+# before config.yml deploys hardening config and starts the service, and
+# the service must be running before any psql-based task (replication
+# role creation, pgaudit) can do anything.
+
+- name: Install PostgreSQL packages
+  ansible.builtin.include_tasks: repo.yml
+  tags: [prep]
+
+- name: Configure TLS
+  ansible.builtin.include_tasks: ssl.yml
+  tags: [prep]
+
+- name: Initialize the data directory (standalone/primary)
+  ansible.builtin.include_tasks: initdb.yml
+  tags: [prep]
+  when: postgresql_role != 'replica'
+
+- name: Populate the data directory from the primary (replica)
+  ansible.builtin.include_tasks: replica_basebackup.yml
+  tags: [prep]
+  when: postgresql_role == 'replica'
+
+- name: Deploy configuration and start PostgreSQL
+  ansible.builtin.include_tasks: config.yml
+  tags: [config]
+
+- name: Create the replication role (primary only)
+  ansible.builtin.include_tasks: primary_replication_role.yml
+  tags: [replication]
+  when: postgresql_role == 'primary'
+
+- name: Enable pgAudit
+  ansible.builtin.include_tasks: pgaudit.yml
+  tags: [pgaudit]
+  when: postgresql_pgaudit_enabled | bool
+
+- name: Configure WAL archiving
+  ansible.builtin.include_tasks: backup.yml
+  tags: [backup]

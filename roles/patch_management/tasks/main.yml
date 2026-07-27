@@ -1,0 +1,99 @@
+---
+- name: Require a change ticket extra-var on tiers that mandate one
+  ansible.builtin.assert:
+    that:
+      - change_ticket is defined
+      - change_ticket | length > 0
+    fail_msg: >-
+      This host is in a gxp_tier that requires patching to be tied to a
+      change ticket (patch_requires_change_ticket: true). Re-run with
+      `-e change_ticket=CR-12345`.
+  when: patch_requires_change_ticket | default(false) | bool
+
+- name: Record the start of this patch run for local evidence
+  ansible.builtin.lineinfile:
+    path: /var/log/ansible-patch-runs.log
+    create: true
+    owner: root
+    group: root
+    mode: "0640"
+    line: >-
+      {{ ansible_date_time.iso8601 }} START
+      ticket={{ change_ticket | default('none') }}
+      security_only={{ patch_security_only }}
+      run_by={{ lookup('env', 'USER') | default('unknown', true) }}
+
+- name: Ensure needs-restarting (dnf-utils) is available
+  ansible.builtin.dnf:
+    name: dnf-utils
+    state: present
+
+- name: List available updates (evidence + change record)
+  ansible.builtin.command: dnf check-update --quiet
+  register: patch_available_updates
+  changed_when: false
+  failed_when: patch_available_updates.rc not in [0, 100]
+  # dnf check-update exits 100 when updates ARE available — that's not a
+  # task failure, it's the expected "yes there's work to do" case.
+
+- name: Show update count for this run
+  ansible.builtin.debug:
+    msg: >-
+      {{ patch_available_updates.stdout_lines | length }} package(s)
+      pending update on {{ inventory_hostname }}.
+
+- name: Apply security-only updates
+  ansible.builtin.dnf:
+    name: "*"
+    state: latest
+    security: true
+    exclude: "{{ patch_exclude_packages }}"
+  register: patch_result
+  when: patch_security_only | bool
+
+- name: Apply all available updates
+  ansible.builtin.dnf:
+    name: "*"
+    state: latest
+    exclude: "{{ patch_exclude_packages }}"
+  register: patch_result
+  when: not (patch_security_only | bool)
+
+- name: Check whether a reboot is required
+  ansible.builtin.command: needs-restarting -r
+  register: patch_needs_restart
+  changed_when: false
+  failed_when: patch_needs_restart.rc not in [0, 1]
+  # needs-restarting -r exits 1 when a reboot IS required — again, not a
+  # failure, it's the signal we're checking for.
+
+- name: Reboot if required and permitted for this tier
+  ansible.builtin.reboot:
+    reboot_timeout: "{{ patch_reboot_timeout_seconds }}"
+    msg: "Rebooting for patch compliance — change_ticket={{ change_ticket | default('none') }}"
+  when:
+    - patch_needs_restart.rc == 1
+    - patch_reboot_allowed | bool
+
+- name: Warn if a reboot is required but not permitted for this tier
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: {{ inventory_hostname }} requires a reboot to complete
+      patching but patch_reboot_allowed is false. This host is patched
+      but NOT yet in its fully-updated running state.
+  when:
+    - patch_needs_restart.rc == 1
+    - not (patch_reboot_allowed | bool)
+
+- name: Record the end of this patch run for local evidence
+  ansible.builtin.lineinfile:
+    path: /var/log/ansible-patch-runs.log
+    create: true
+    owner: root
+    group: root
+    mode: "0640"
+    line: >-
+      {{ ansible_date_time.iso8601 }} END
+      ticket={{ change_ticket | default('none') }}
+      changed={{ patch_result.changed | default(false) }}
+      reboot_required={{ patch_needs_restart.rc == 1 }}

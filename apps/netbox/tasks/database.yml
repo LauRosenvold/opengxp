@@ -1,0 +1,58 @@
+---
+# Only when netbox_external_database_enabled and
+# netbox_manage_external_database are both true. Reaches into
+# netbox_database_host itself (delegate_to — that host must be in the
+# same inventory this playbook run uses, reachable over SSH) using the
+# same become_user: postgres pattern server_roles/postgresql_server uses
+# for its own replication role.
+
+- name: Check whether the NetBox database role already exists
+  ansible.builtin.command: >
+    {{ netbox_database_psql_path }} -tAc
+    "SELECT 1 FROM pg_roles WHERE rolname='{{ netbox_database_user }}'"
+  delegate_to: "{{ netbox_database_host }}"
+  become: true
+  become_user: postgres
+  register: netbox_db_role_check
+  changed_when: false
+
+- name: Create the NetBox database role
+  ansible.builtin.command: >
+    {{ netbox_database_psql_path }} -c
+    "CREATE ROLE {{ netbox_database_user }} WITH LOGIN ENCRYPTED PASSWORD '{{ netbox_database_password }}'"
+  delegate_to: "{{ netbox_database_host }}"
+  become: true
+  become_user: postgres
+  when: netbox_db_role_check.stdout | trim != '1'
+  changed_when: true
+  no_log: true   # command line contains the database password
+
+- name: Check whether the NetBox database already exists
+  ansible.builtin.command: >
+    {{ netbox_database_psql_path }} -tAc
+    "SELECT 1 FROM pg_database WHERE datname='{{ netbox_database_name }}'"
+  delegate_to: "{{ netbox_database_host }}"
+  become: true
+  become_user: postgres
+  register: netbox_db_check
+  changed_when: false
+
+- name: Create the NetBox database
+  ansible.builtin.command: >
+    {{ netbox_database_psql_path }} -c
+    "CREATE DATABASE {{ netbox_database_name }} OWNER {{ netbox_database_user }} ENCODING 'UTF8'"
+  delegate_to: "{{ netbox_database_host }}"
+  become: true
+  become_user: postgres
+  when: netbox_db_check.stdout | trim != '1'
+  changed_when: true
+
+- name: Remind that this host also needs a pg_hba.conf entry allowing it in
+  ansible.builtin.debug:
+    msg: >-
+      Database/role created on {{ netbox_database_host }}. That host's
+      postgresql_allowed_hosts (see
+      inventories/<env>/group_vars/dbservers.yml or its host_vars) must
+      include a CIDR covering {{ inventory_hostname }}, or
+      server_roles/postgresql_server's pg_hba.conf will still reject the
+      connection even though the role/database now exist.

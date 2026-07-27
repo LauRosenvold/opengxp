@@ -1,0 +1,23 @@
+---
+# Baseline utility packages every host in the fleet gets, regardless of
+# function. Keep this list short and justify additions in the PR — every
+# installed package is attack surface and something the CIS/STIG file
+# audit has to account for.
+common_packages:
+  - chrony
+  - rsyslog
+  - audit
+  - aide
+  - policycoreutils-python-utils
+  - openscap-scanner
+  - scap-security-guide
+  - tmux
+  - vim-enhanced
+
+common_disable_ctrl_alt_del: true
+
+common_motd_managed: true
+common_issue_banner_managed: true
+
+common_timezone: "{{ system_timezone | default('UTC') }}"
+common_locale: "{{ system_locale | default('en_US.UTF-8') }}"

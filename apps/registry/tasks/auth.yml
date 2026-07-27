@@ -1,0 +1,48 @@
+---
+# distribution/distribution's htpasswd auth handler only accepts bcrypt
+# hashes (not MD5-crypt, not plain crypt) — this isn't a preference, an
+# MD5 or crypt-hashed entry silently fails every login attempt against
+# the registry. community.general.htpasswd needs the passlib Python
+# library on THIS host (the one running the module, i.e. the managed
+# node) to produce one.
+
+- name: Ensure passlib is available for bcrypt hashing
+  ansible.builtin.dnf:
+    name: python3-passlib
+    state: present
+
+- name: Check whether an htpasswd file already exists
+  ansible.builtin.stat:
+    path: "{{ registry_app_dir }}/auth/htpasswd"
+  register: registry_htpasswd_stat
+
+- name: Read existing htpasswd usernames, if any
+  ansible.builtin.command: "cut -d: -f1 {{ registry_app_dir }}/auth/htpasswd"
+  register: registry_existing_users
+  changed_when: false
+  when: registry_htpasswd_stat.stat.exists
+
+- name: Remove htpasswd entries for users no longer in registry_users
+  community.general.htpasswd:
+    path: "{{ registry_app_dir }}/auth/htpasswd"
+    name: "{{ item }}"
+    state: absent
+  loop: >-
+    {{ (registry_existing_users.stdout_lines | default([]))
+       | difference(registry_users | map(attribute='username') | list) }}
+  notify: Restart registry
+
+- name: Ensure each configured user exists in the htpasswd file with the current password
+  community.general.htpasswd:
+    path: "{{ registry_app_dir }}/auth/htpasswd"
+    name: "{{ item.username }}"
+    password: "{{ item.password }}"
+    crypt_scheme: bcrypt
+    owner: root
+    group: root
+    mode: "0640"
+  loop: "{{ registry_users }}"
+  loop_control:
+    label: "{{ item.username }}"
+  no_log: true   # avoids logging passwords
+  notify: Restart registry

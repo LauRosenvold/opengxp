@@ -1,0 +1,16 @@
+---
+# Generates OpenSCAP compliance evidence without changing any security
+# control. Safe to run at any time, including immediately after
+# hardening.yml to confirm the applied state, or on a periodic schedule
+# for the periodic-review evidence described in docs/VALIDATION.md.
+
+- name: Generate compliance evidence
+  # !hyperv_hosts: OpenSCAP/oscap here targets RHEL/AlmaLinux content —
+  # not applicable to a WinRM-connected Windows host. !localhost: the
+  # Ansible control node itself. See docs/PROVISIONING.md.
+  hosts: all:!hyperv_hosts:!localhost
+  become: true
+
+  roles:
+    - role: compliance_scan
+      tags: [compliance, scan]

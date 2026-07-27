@@ -1,0 +1,22 @@
+# {{ ansible_managed | default('Managed by Ansible — server_roles/kubernetes_node') }}
+# L2 (ARP/NDP) advertisement mode only — see docs/SERVER_ROLES.md for why
+# BGP mode isn't wired up here.
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: default-pool
+  namespace: metallb-system
+spec:
+  addresses:
+{% for pool in k8s_metallb_address_pools %}
+    - "{{ pool }}"
+{% endfor %}
+---
+apiVersion: metallb.io/v1beta1
+kind: L2Advertisement
+metadata:
+  name: default-l2-advertisement
+  namespace: metallb-system
+spec:
+  ipAddressPools:
+    - default-pool

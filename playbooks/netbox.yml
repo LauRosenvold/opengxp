@@ -1,0 +1,22 @@
+---
+# Application deployment, not part of playbooks/site.yml — see
+# docs/APPS.md. Assumes:
+#   1. This host has already been through playbooks/site.yml (hardened).
+#   2. playbooks/docker_host.yml has already run against it (Docker
+#      installed) — every host in netbox_hosts should also be in
+#      docker_hosts.
+#   3. If netbox_external_database_enabled (the default), a
+#      server_roles/postgresql_server host already exists in the
+#      dbservers group and is reachable from this host.
+#
+# Usage:
+#   ansible-playbook playbooks/netbox.yml \
+#     -i inventories/staging/hosts.yml --check --diff
+
+- name: Deploy NetBox
+  hosts: netbox_hosts
+  become: true
+
+  roles:
+    - role: netbox
+      tags: [netbox]

@@ -1,0 +1,50 @@
+---
+# Deliberate, explicit-confirmation-gated Kubernetes version upgrade — see
+# server_roles/kubernetes_node/tasks/upgrade.yml's header comment and
+# roles/fips_mode for the same "extra-var gate" pattern used elsewhere in
+# this repo for disruptive, change-controlled actions.
+#
+# Order matters and this splits into two plays deliberately: ALL
+# control-plane nodes must finish (`kubeadm upgrade apply` on the first
+# one, `kubeadm upgrade node` on the rest) before ANY worker starts
+# upgrading — a worker upgrading against a control plane that hasn't
+# finished upgrading yet is exactly the kind of version-skew problem
+# kubeadm's own docs warn about. `serial: 1` on both plays means nodes
+# upgrade one at a time — never bulk-upgrade a live cluster.
+#
+# Usage (test in staging first, always):
+#   ansible-playbook playbooks/kubernetes_upgrade.yml \
+#     -i inventories/staging/hosts.yml \
+#     --tags upgrade \
+#     -e k8s_upgrade_confirmed=true \
+#     -e k8s_target_version_full=1.31.4
+#
+# `--tags upgrade` is NOT optional: tasks/upgrade.yml is tagged
+# `[upgrade, never]`, meaning it's excluded from a normal run and only
+# executes when `upgrade` is explicitly requested. Forgetting `--tags
+# upgrade` here silently runs the ordinary prep/init/join/cni tasks
+# instead (harmless, but not what you asked for) and skips the upgrade
+# entirely — don't add `tags:` on the role entries below to "help", it
+# would add those tags to every task in the role and defeat this gate.
+#
+# Before running this: update k8s_version in
+# inventories/<env>/group_vars/k8s_nodes.yml to the new MINOR version
+# first (e.g. "1.31" -> "1.32") if you're crossing a minor version
+# boundary, so the repo tasks point at the right pkgs.k8s.io/Satellite
+# content view — this playbook re-runs those tasks before upgrading.
+
+- name: Upgrade control-plane nodes
+  hosts: k8s_control_plane
+  become: true
+  serial: 1
+
+  roles:
+    - kubernetes_node
+
+- name: Upgrade worker nodes
+  hosts: k8s_workers
+  become: true
+  serial: 1
+
+  roles:
+    - kubernetes_node

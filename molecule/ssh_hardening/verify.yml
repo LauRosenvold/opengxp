@@ -1,0 +1,50 @@
+---
+- name: Verify
+  hosts: all
+  become: true
+  tasks:
+    - name: Read the deployed sshd_config
+      ansible.builtin.slurp:
+        src: /etc/ssh/sshd_config
+      register: sshd_config_content
+
+    - name: Assert password authentication is disabled
+      ansible.builtin.assert:
+        that:
+          - "'PasswordAuthentication no' in (sshd_config_content.content | b64decode)"
+        fail_msg: "PasswordAuthentication no was not applied"
+
+    - name: Assert root login is disabled
+      ansible.builtin.assert:
+        that:
+          - "'PermitRootLogin no' in (sshd_config_content.content | b64decode)"
+        fail_msg: "PermitRootLogin no was not applied"
+
+    - name: Assert weak Diffie-Hellman moduli were removed
+      ansible.builtin.shell: |
+        set -o pipefail
+        awk '$5 < 3071' /etc/ssh/moduli | wc -l
+      args:
+        executable: /bin/bash
+      register: weak_moduli_count
+      changed_when: false
+
+    - name: Assert no weak moduli remain
+      ansible.builtin.assert:
+        that:
+          - weak_moduli_count.stdout | trim == "0"
+        fail_msg: "Weak (<3072 bit) Diffie-Hellman moduli are still present in /etc/ssh/moduli"
+
+    - name: Assert sshd config is syntactically valid
+      ansible.builtin.command: sshd -t
+      changed_when: false
+
+    - name: Assert sshd is running
+      ansible.builtin.service_facts:
+
+    - name: Assert sshd service is active
+      ansible.builtin.assert:
+        that:
+          - "'sshd.service' in ansible_facts.services"
+          - "ansible_facts.services['sshd.service'].state == 'running'"
+        fail_msg: "sshd.service is not running"

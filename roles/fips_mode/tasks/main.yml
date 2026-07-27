@@ -1,0 +1,49 @@
+---
+- name: Check current FIPS mode state
+  ansible.builtin.command: fips-mode-setup --check
+  register: fips_current_state
+  changed_when: false
+  failed_when: false
+
+- name: Determine whether a FIPS mode transition is needed
+  ansible.builtin.set_fact:
+    fips_transition_needed: >-
+      {{ (fips_mode_enabled | bool) != ('is enabled' in fips_current_state.stdout) }}
+
+- name: Warn and stop when a FIPS transition is needed but not explicitly confirmed
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: {{ inventory_hostname }} needs to
+      {{ 'enable' if fips_mode_enabled | bool else 'disable' }} FIPS mode
+      (fips_mode_enabled={{ fips_mode_enabled }}, currently
+      "{{ fips_current_state.stdout }}"). This changes the kernel command
+      line and rebuilds initramfs, and REQUIRES a reboot to take effect —
+      it is only applied when you explicitly pass
+      `-e allow_fips_transition=true` on a change-controlled maintenance
+      run. Re-run with that flag once a maintenance window/change ticket
+      is in place.
+  when:
+    - fips_transition_needed
+    - not (allow_fips_transition | default(false) | bool)
+
+- name: Apply the confirmed FIPS mode transition
+  when:
+    - fips_transition_needed
+    - allow_fips_transition | default(false) | bool
+  block:
+    - name: Enable FIPS mode
+      ansible.builtin.command: fips-mode-setup --enable
+      when: fips_mode_enabled | bool
+      changed_when: true
+
+    - name: Disable FIPS mode
+      ansible.builtin.command: fips-mode-setup --disable
+      when: not (fips_mode_enabled | bool)
+      changed_when: true
+
+    - name: Record that a reboot is required to complete the FIPS transition
+      ansible.builtin.debug:
+        msg: >-
+          FIPS mode {{ 'enable' if fips_mode_enabled | bool else 'disable' }}
+          applied on {{ inventory_hostname }} — a reboot is required before
+          this takes effect. Include it in this maintenance window.

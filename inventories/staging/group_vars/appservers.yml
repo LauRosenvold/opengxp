@@ -1,0 +1,4 @@
+---
+firewalld_rules:
+  - { port: "8080/tcp" }
+  - { port: "8443/tcp" }

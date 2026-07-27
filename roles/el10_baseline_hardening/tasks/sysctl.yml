@@ -1,0 +1,23 @@
+---
+- name: Set net.ipv4.ip_forward per el10_baseline_ip_forward_enabled
+  ansible.posix.sysctl:
+    name: net.ipv4.ip_forward
+    value: "{{ '1' if el10_baseline_ip_forward_enabled | bool else '0' }}"
+    sysctl_file: /etc/sysctl.d/60-cis-hardening.conf
+    state: present
+    reload: true
+
+- name: Apply hardened sysctl settings
+  ansible.posix.sysctl:
+    name: "{{ item.key }}"
+    value: "{{ item.value }}"
+    sysctl_file: /etc/sysctl.d/60-cis-hardening.conf
+    state: present
+    reload: true
+    # Some keys (notably several ipv6.* ones) only exist when that
+    # protocol/module is loaded — don't fail the whole run over a key
+    # that's absent because the surface it controls isn't present either.
+    ignoreerrors: true
+  loop: "{{ el10_baseline_sysctl_settings | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"

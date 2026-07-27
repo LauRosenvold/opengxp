@@ -1,0 +1,156 @@
+---
+- name: Warn and skip when no identity backend is configured yet
+  ansible.builtin.debug:
+    msg: >-
+      NOTE: identity_backend_enabled is false for {{ inventory_hostname }}
+      — local accounts only (see roles/user_access_gxp). This is an open
+      item for centralized identity/access review once a real AD/IdM
+      domain is available — set identity_backend_enabled: true and the
+      identity_* vars in group_vars/all.yml.
+  when: not (identity_backend_enabled | bool)
+
+- name: Domain join and sssd configuration
+  when: identity_backend_enabled | bool
+  block:
+    - name: Fail loudly if join credentials are missing
+      ansible.builtin.assert:
+        that:
+          - identity_domain | length > 0
+          - identity_join_username | length > 0
+          - identity_join_password | length > 0
+          - identity_allowed_groups | length > 0
+        fail_msg: >-
+          identity_backend_enabled is true but identity_domain,
+          identity_join_username, identity_join_password, or
+          identity_allowed_groups is empty. Join credentials must come
+          from an ansible-vault encrypted group_vars/all.vault.yml.
+          identity_allowed_groups must be non-empty — sssd's
+          access_provider=simple fails closed with an empty allow-list,
+          which would lock out every domain user.
+
+    - name: Install AD join packages
+      ansible.builtin.dnf:
+        name:
+          - realmd
+          - sssd
+          - sssd-tools
+          - adcli
+          - samba-common-tools
+          - oddjob
+          - oddjob-mkhomedir
+        state: present
+      when: identity_backend == 'ad'
+
+    - name: Install IdM client packages
+      ansible.builtin.dnf:
+        name:
+          - ipa-client
+          - sssd
+        state: present
+      when: identity_backend == 'ipa'
+
+    - name: Check whether this host is already joined to the domain
+      ansible.builtin.command: realm list
+      register: identity_realm_list
+      changed_when: false
+      failed_when: false
+
+    - name: Join Active Directory domain via realmd
+      ansible.builtin.shell: |
+        set -o pipefail
+        echo '{{ identity_join_password }}' | realm join --user='{{ identity_join_username }}' {{ identity_domain }}
+      args:
+        executable: /bin/bash
+      when:
+        - identity_backend == 'ad'
+        - identity_domain not in (identity_realm_list.stdout | default(''))
+      no_log: true
+      changed_when: true
+
+    - name: Join IdM domain via ipa-client-install
+      ansible.builtin.command: >
+        ipa-client-install --domain={{ identity_domain }}
+        --principal={{ identity_join_username }}
+        --password={{ identity_join_password }}
+        --unattended
+      args:
+        creates: /etc/ipa/default.conf
+      when: identity_backend == 'ipa'
+      no_log: true
+      changed_when: true
+
+    - name: Restrict interactive login to explicitly allowed groups
+      community.general.ini_file:
+        path: /etc/sssd/sssd.conf
+        section: "domain/{{ identity_domain }}"
+        option: "{{ item.option }}"
+        value: "{{ item.value }}"
+        mode: "0600"
+        backup: true
+      loop:
+        - { option: access_provider, value: simple }
+        - { option: "simple_allow_groups", value: "{{ identity_allowed_groups | join(',') }}" }
+        - { option: cache_credentials, value: "{{ identity_cache_credentials | lower }}" }
+        - { option: offline_credentials_expiration, value: "{{ identity_offline_credentials_expiration_days }}" }
+        - { option: use_fully_qualified_names, value: "{{ identity_use_fully_qualified_names | lower }}" }
+        - { option: default_shell, value: "{{ identity_default_shell }}" }
+        - { option: fallback_homedir, value: "{{ identity_fallback_homedir }}" }
+        - { option: enumerate, value: "false" }
+      notify: Restart sssd
+
+    - name: Configure AD-specific ID mapping and GPO access control
+      community.general.ini_file:
+        path: /etc/sssd/sssd.conf
+        section: "domain/{{ identity_domain }}"
+        option: "{{ item.option }}"
+        value: "{{ item.value }}"
+        mode: "0600"
+        backup: true
+      loop:
+        - { option: ldap_id_mapping, value: "{{ identity_ad_id_mapping_enabled | lower }}" }
+        - { option: ad_gpo_access_control, value: "{{ identity_ad_gpo_access_control }}" }
+      when: identity_backend == 'ad'
+      notify: Restart sssd
+
+    - name: Ensure home directories are created on first login
+      ansible.builtin.command: authselect enable-feature with-mkhomedir
+      register: identity_mkhomedir
+      changed_when: "'already' not in (identity_mkhomedir.stderr | default(''))"
+      failed_when: false
+
+    - name: Apply authselect changes
+      ansible.builtin.command: authselect apply-changes
+      changed_when: true
+
+    - name: Ensure sssd is enabled and running
+      ansible.builtin.systemd:
+        name: sssd
+        state: started
+        enabled: true
+
+    - name: Flush handlers now so group resolution reflects the final sssd.conf
+      ansible.builtin.meta: flush_handlers
+
+    - name: Verify each allowed group actually resolves via SSSD
+      ansible.builtin.command: "getent group {{ item }}"
+      register: identity_group_resolve_check
+      changed_when: false
+      failed_when: false
+      loop: "{{ identity_allowed_groups }}"
+      loop_control:
+        label: "{{ item }}"
+
+    - name: Warn about any allowed group that didn't resolve
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: {{ item.item }} did not resolve via `getent group` on
+          {{ inventory_hostname }} — check the group actually exists in
+          the directory, that identity_use_fully_qualified_names matches
+          how you spelled it here, and that this host's join succeeded.
+          Access control (simple_allow_groups) referencing a
+          non-resolving group is a silent no-op, not an error — nobody in
+          that group can log in, but sssd won't tell you why.
+      loop: "{{ identity_group_resolve_check.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when: item.rc != 0

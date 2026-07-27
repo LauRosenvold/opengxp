@@ -1,0 +1,11 @@
+---
+- name: Enforce ownership and permissions on sensitive system files
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    owner: "{{ item.owner }}"
+    group: "{{ item.group }}"
+    mode: "{{ item.mode }}"
+  loop: "{{ el10_baseline_sensitive_file_perms }}"
+  loop_control:
+    label: "{{ item.path }}"
+  when: item.path is exists

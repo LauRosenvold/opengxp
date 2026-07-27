@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# {{ ansible_managed | default('Managed by Ansible — server_roles/docker_host') }}
+#
+# Docker inserts its own ACCEPT rules ahead of firewalld's zone rules for
+# any published container port, via the DOCKER-USER chain (consulted
+# before Docker's own forwarding rules) — firewalld_baseline's
+# default-deny zone does NOT protect published container ports by itself.
+# This script is the standard mitigation: restrict DOCKER-USER to
+# established/related traffic plus explicitly allowed source CIDRs,
+# dropping everything else before it ever reaches Docker's rules.
+#
+# Docker (re)creates the DOCKER-USER chain every time dockerd starts, so
+# this must re-run after every docker.service start — see the
+# ExecStartPost= systemd drop-in that invokes it.
+
+set -euo pipefail
+
+iptables -F DOCKER-USER
+
+iptables -A DOCKER-USER -m state --state RELATED,ESTABLISHED -j RETURN
+
+{% for cidr in docker_allowed_source_cidrs %}
+iptables -A DOCKER-USER -s {{ cidr }} -j RETURN
+{% endfor %}
+
+# Log before dropping so denied attempts show up wherever
+# roles/logging_forward ships kernel/netfilter logs.
+iptables -A DOCKER-USER -j LOG --log-prefix "DOCKER-USER-DROP: " --log-level 4
+iptables -A DOCKER-USER -j DROP

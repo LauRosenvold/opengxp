@@ -1,0 +1,17 @@
+---
+galaxy_info:
+  role_name: vm_provision
+  description: >-
+    Creates (or decommissions) a VM from a template on a hypervisor
+    cluster — vCenter (community.vmware.vmware_guest) or Hyper-V
+    (ansible.windows PowerShell via WinRM, Import-VM -Copy -GenerateNewId
+    from an exported template). Runs against the hypervisor management
+    API/host, not a managed Linux host. Lives in provisioning/, a tier
+    that precedes roles/server_roles/apps entirely — see
+    docs/PROVISIONING.md.
+  license: Apache-2.0
+  min_ansible_version: "2.15"
+  platforms:
+    - name: EL
+      versions: ["9", "10"]
+dependencies: []

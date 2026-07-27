@@ -1,0 +1,28 @@
+---
+# Assumes server_roles/docker_host has already run against this host —
+# this role only deploys the NetBox stack on top of an existing,
+# hardened Docker installation, it doesn't provision Docker itself. See
+# docs/APPS.md.
+
+- name: Fail loudly up front if required secrets/config are missing
+  ansible.builtin.include_tasks: secrets.yml
+  tags: [prep]
+
+- name: Create bind-mounted data directories
+  ansible.builtin.include_tasks: directories.yml
+  tags: [prep]
+
+- name: Provision the external database and role
+  ansible.builtin.include_tasks: database.yml
+  tags: [database]
+  when:
+    - netbox_external_database_enabled | bool
+    - netbox_manage_external_database | bool
+
+- name: Configure TLS for the reverse proxy
+  ansible.builtin.include_tasks: tls.yml
+  tags: [prep]
+
+- name: Render and deploy the compose stack
+  ansible.builtin.include_tasks: compose.yml
+  tags: [compose]

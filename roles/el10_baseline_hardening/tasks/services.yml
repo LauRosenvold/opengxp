@@ -1,0 +1,17 @@
+---
+- name: Disable and mask legacy/insecure services if present
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    state: stopped
+    enabled: false
+    masked: true
+  loop: "{{ el10_baseline_disabled_services }}"
+  register: el10_baseline_svc_result
+  failed_when:
+    - el10_baseline_svc_result is failed
+    - "'Could not find the requested service' not in (el10_baseline_svc_result.msg | default(''))"
+
+- name: Remove disallowed legacy packages
+  ansible.builtin.dnf:
+    name: "{{ el10_baseline_disallowed_packages }}"
+    state: absent

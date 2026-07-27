@@ -1,0 +1,32 @@
+---
+- name: Configure /etc/login.defs account aging defaults
+  ansible.builtin.lineinfile:
+    path: /etc/login.defs
+    regexp: "^#?\\s*{{ item.key }}\\s+"
+    line: "{{ item.key }}\t{{ item.value }}"
+  loop:
+    - { key: PASS_MAX_DAYS, value: "{{ el10_baseline_pass_max_days }}" }
+    - { key: PASS_MIN_DAYS, value: "{{ el10_baseline_pass_min_days }}" }
+    - { key: PASS_WARN_AGE, value: "{{ el10_baseline_pass_warn_age }}" }
+    - { key: UID_MIN, value: "{{ el10_baseline_uid_min }}" }
+  loop_control:
+    label: "{{ item.key }}"
+
+- name: Get list of existing local users with password aging that predates policy
+  ansible.builtin.command: >
+    awk -F: '($3 >= {{ el10_baseline_uid_min }}) {print $1}' /etc/passwd
+  register: el10_baseline_existing_users
+  changed_when: false
+
+- name: Apply PASS_MAX_DAYS to existing interactive users (login.defs only affects new users)
+  ansible.builtin.command: >
+    chage --maxdays {{ el10_baseline_pass_max_days }}
+    --mindays {{ el10_baseline_pass_min_days }}
+    --warndays {{ el10_baseline_pass_warn_age }}
+    {{ item }}
+  loop: "{{ el10_baseline_existing_users.stdout_lines }}"
+  # chage has no --check mode; this always reports "changed" even when the
+  # value is already correct. Harmless in effect (re-asserting an identical
+  # value is a no-op on disk) but noisy in --diff output — acceptable
+  # trade-off over shelling out per-user to `chage -l` and parsing it.
+  changed_when: true

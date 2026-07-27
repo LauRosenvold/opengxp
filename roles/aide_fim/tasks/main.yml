@@ -1,0 +1,59 @@
+---
+- name: Ensure AIDE is installed
+  ansible.builtin.dnf:
+    name: aide
+    state: present
+
+- name: Add GxP-specific watched paths to aide.conf
+  ansible.builtin.blockinfile:
+    path: /etc/aide.conf
+    marker: "# {mark} ANSIBLE MANAGED BLOCK — roles/aide_fim GxP extra paths"
+    block: |
+      {% for item in aide_gxp_extra_paths %}
+      {{ item.path }} {{ item.rule }}
+      {% endfor %}
+  register: aide_conf_changed
+
+- name: Check whether an AIDE database already exists
+  ansible.builtin.stat:
+    path: "{{ aide_db_path }}"
+  register: aide_db_stat
+
+- name: Initialize AIDE database (first run only)
+  ansible.builtin.command: aide --init
+  when: not aide_db_stat.stat.exists
+  changed_when: true
+
+- name: Promote freshly initialized database to the active one
+  ansible.builtin.command: "mv {{ aide_db_new_path }} {{ aide_db_path }}"
+  when: not aide_db_stat.stat.exists
+  changed_when: true
+
+- name: Warn that aide.conf changed on a host with an existing baseline
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: aide.conf's GxP watch list changed on {{ inventory_hostname }}
+      but an AIDE database already exists. New/changed paths won't be
+      covered until `aide --init` is re-run and the database promoted —
+      this is intentionally NOT automatic (re-initializing silently would
+      erase tamper-evidence continuity). Schedule it as a change-controlled
+      action and record the old database's checksum before replacing it.
+  when:
+    - aide_conf_changed.changed
+    - aide_db_stat.stat.exists
+
+- name: Deploy the AIDE check wrapper script
+  ansible.builtin.template:
+    src: aide-check-wrapper.sh.j2
+    dest: /usr/local/sbin/aide-check-gxp.sh
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Schedule periodic AIDE checks via cron.d
+  ansible.builtin.template:
+    src: aide_cron.j2
+    dest: /etc/cron.d/aide-gxp-check
+    owner: root
+    group: root
+    mode: "0644"

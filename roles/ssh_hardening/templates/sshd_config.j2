@@ -1,0 +1,64 @@
+# {{ ansible_managed | default('Managed by Ansible — roles/ssh_hardening') }}
+# CIS-aligned OpenSSH server configuration. Do not edit directly — changes
+# will be reverted on the next Ansible run. See docs/BASELINE_MAPPING.md.
+
+Port {{ ssh_port }}
+{% for addr in ssh_listen_addresses %}
+ListenAddress {{ addr }}
+{% endfor %}
+
+Protocol 2
+
+PermitRootLogin {{ ssh_permit_root_login }}
+PasswordAuthentication {{ ssh_password_authentication }}
+PermitEmptyPasswords {{ ssh_permit_empty_passwords }}
+ChallengeResponseAuthentication no
+KbdInteractiveAuthentication no
+HostbasedAuthentication {{ ssh_hostbased_authentication }}
+IgnoreRhosts {{ 'yes' if ssh_ignore_rhosts else 'no' }}
+PubkeyAuthentication yes
+PermitUserEnvironment {{ ssh_permit_user_environment }}
+UsePAM {{ ssh_use_pam }}
+
+# Kerberos SSO for domain users — see roles/identity_sssd and
+# docs/IDENTITY.md. GSSAPICleanupCredentials only matters when
+# GSSAPIAuthentication is actually on; harmless either way.
+GSSAPIAuthentication {{ 'yes' if ssh_gssapi_auth_enabled | bool else 'no' }}
+GSSAPICleanupCredentials yes
+
+X11Forwarding {{ ssh_x11_forwarding }}
+AllowTcpForwarding {{ ssh_allow_tcp_forwarding }}
+AllowAgentForwarding {{ ssh_allow_agent_forwarding }}
+Compression {{ ssh_compression }}
+
+MaxAuthTries {{ ssh_max_auth_tries }}
+MaxSessions {{ ssh_max_sessions }}
+LoginGraceTime {{ ssh_login_grace_time }}
+ClientAliveInterval {{ ssh_client_alive_interval | default(300) }}
+ClientAliveCountMax {{ ssh_client_alive_count_max | default(0) }}
+
+LogLevel {{ ssh_log_level }}
+SyslogFacility AUTHPRIV
+
+Banner {{ ssh_banner_path }}
+
+Ciphers {{ ssh_ciphers | join(',') }}
+MACs {{ ssh_macs | join(',') }}
+KexAlgorithms {{ ssh_kex_algorithms | join(',') }}
+
+{% if ssh_allow_users %}
+AllowUsers {{ ssh_allow_users | join(' ') }}
+{% endif %}
+{% if ssh_allow_groups %}
+AllowGroups {{ ssh_allow_groups | join(' ') }}
+{% endif %}
+{% if ssh_deny_users %}
+DenyUsers {{ ssh_deny_users | join(' ') }}
+{% endif %}
+{% if ssh_deny_groups %}
+DenyGroups {{ ssh_deny_groups | join(' ') }}
+{% endif %}
+
+Subsystem sftp /usr/libexec/openssh/sftp-server -l INFO
+
+AcceptEnv LANG LC_*

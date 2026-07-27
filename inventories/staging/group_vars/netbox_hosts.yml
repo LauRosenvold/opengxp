@@ -1,0 +1,40 @@
+---
+# CANONICAL COPY LIVES IN inventories/production/group_vars/netbox_hosts.yml
+# See the note in staging/group_vars/rhel9.yml — same rule applies here.
+#
+# Runs apps/netbox (see playbooks/netbox.yml — NOT part of
+# playbooks/site.yml). Every host here should ALSO be in docker_hosts —
+# see the note in hosts.yml.
+#
+# Zone-wide open within roles/firewalld_baseline's default-deny zone —
+# same documented gap as docker_hosts/k8s_nodes/dbservers (see
+# docs/APPS.md and docs/SERVER_ROLES.md). Keep in sync with
+# netbox_https_port below if you change it from the default.
+firewalld_rules:
+  - { port: "443/tcp" }
+
+# --- Database ------------------------------------------------------------
+# Point at a real server_roles/postgresql_server host in the dbservers
+# group. Left at apps/netbox's own CHANGEME default here on purpose —
+# this fails loudly (see apps/netbox/tasks/secrets.yml) until set:
+# netbox_database_host: db01.gxp.example.internal
+
+# --- Access ----------------------------------------------------------------
+netbox_allowed_hosts:
+  - "netbox.gxp.example.internal"   # CHANGEME — must match how clients actually reach this host
+
+# --- Secrets ---------------------------------------------------------------
+# All of these fail loudly if left empty (see apps/netbox/tasks/secrets.yml)
+# — supply via an ansible-vault encrypted group_vars/host_vars file, e.g.
+# inventories/production/group_vars/netbox_hosts.vault.yml:
+#   netbox_secret_key: "{{ vault_netbox_secret_key }}"
+#   netbox_superuser_password: "{{ vault_netbox_superuser_password }}"
+#   netbox_redis_password: "{{ vault_netbox_redis_password }}"
+#   netbox_redis_cache_password: "{{ vault_netbox_redis_cache_password }}"
+#   netbox_database_password: "{{ vault_netbox_database_password }}"
+
+# --- TLS -----------------------------------------------------------------------
+# Self-signed by default (see apps/netbox/defaults/main.yml). Point these
+# at a real CA-issued cert/key before this holds anything real:
+# netbox_ssl_cert_src: "/path/on/control/node/netbox.crt"
+# netbox_ssl_key_src: "/path/on/control/node/netbox.key"

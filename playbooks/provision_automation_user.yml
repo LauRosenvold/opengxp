@@ -1,0 +1,37 @@
+---
+# One-time, per-host cold-start bootstrap. Every other playbook in this
+# repo (bootstrap.yml, hardening.yml, site.yml, patch_management.yml,
+# compliance_scan.yml) connects as inventories/<env>/group_vars/all.yml's
+# automation_user_name over SSH key auth — but on a freshly provisioned
+# host that account doesn't exist yet. This playbook is the one place
+# that connects as something else (whatever admin account your
+# provisioning process — kickstart/cloud-init/Satellite — already put on
+# the host) purely to create it.
+#
+# Run this ONCE per host (or once per batch of newly provisioned hosts),
+# never as part of the routine hardening cadence:
+#
+#   ansible-playbook playbooks/provision_automation_user.yml \
+#     -i inventories/production/hosts.yml --limit newhost01 \
+#     -e bootstrap_admin_user=cloud-user \
+#     --ask-pass --ask-become-pass
+#
+# (drop --ask-pass/--ask-become-pass in favor of whatever auth that
+# initial account actually uses — SSH key, Kerberos, etc.)
+#
+# This is itself a privileged, security-relevant action — creating the
+# account that will have standing sudo access to every host it manages —
+# and should be tied to a change ticket like anything else in
+# docs/CHANGE_CONTROL.md, not run casually.
+
+- name: Provision the dedicated Ansible automation user
+  # !hyperv_hosts: that group connects via WinRM, not SSH, and
+  # roles/automation_user is entirely an SSH-key/sudo concept. !localhost:
+  # the Ansible control node itself. See docs/PROVISIONING.md.
+  hosts: all:!hyperv_hosts:!localhost
+  become: true
+  vars:
+    ansible_user: "{{ bootstrap_admin_user }}"
+  roles:
+    - role: automation_user
+      tags: [bootstrap, automation-user]

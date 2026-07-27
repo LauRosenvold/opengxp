@@ -1,0 +1,138 @@
+---
+# Hand-built CIS-equivalent controls for EL10 (RHEL 10 and AlmaLinux 10 —
+# binary-compatible enough that the same tasks apply to both), used only
+# until ansible-lockdown.RHEL10-CIS has a tagged stable release (see
+# requirements.yml and docs/BASELINE_MAPPING.md). AlmaLinux has no CIS
+# automation role of its own either, so it shares this fallback rather
+# than getting a second copy. Deliberately scoped to the domains NOT
+# already owned by a dedicated role in this repo:
+# SSH -> roles/ssh_hardening, audit -> roles/auditd_gxp,
+# SELinux -> roles/selinux_enforce, firewall -> roles/firewalld_baseline,
+# sudo/local accounts -> roles/user_access_gxp, time -> roles/chrony_time.
+
+# --- Section toggles ----------------------------------------------------------
+el10_baseline_filesystem_enabled: true
+el10_baseline_kernel_modules_enabled: true
+el10_baseline_sysctl_enabled: true
+el10_baseline_services_enabled: true
+el10_baseline_pam_password_enabled: true
+el10_baseline_login_defs_enabled: true
+el10_baseline_permissions_enabled: true
+el10_baseline_cron_at_enabled: true
+el10_baseline_umask_enabled: true
+
+# --- Filesystem: unused/legacy filesystem kernel modules (CIS 1.1.1.x) --------
+el10_baseline_disabled_filesystems:
+  - cramfs
+  - freevxfs
+  - hfs
+  - hfsplus
+  - jffs2
+  - squashfs   # only disable if the host doesn't need snap/flatpak-style images
+  - udf
+  - usb-storage
+
+# --- Kernel modules: uncommon network protocols (CIS 3.2.x) -------------------
+el10_baseline_disabled_net_modules:
+  - dccp
+  - sctp
+  - rds
+  - tipc
+
+# --- sysctl network hardening (CIS 3.1.x / 3.3.x) -----------------------------
+# net.ipv4.ip_forward is deliberately its own top-level var, not a key in
+# the dict below: hosts that legitimately need to forward packets
+# (server_roles/docker_host, any future NAT/router role) override just
+# this one value in their own group_vars — e.g.
+# inventories/<env>/group_vars/docker_hosts.yml sets
+# el10_baseline_ip_forward_enabled: true — without having to copy/paste
+# and re-maintain the entire sysctl dict (Ansible doesn't deep-merge
+# dicts across precedence layers by default, so a partial override of the
+# dict itself isn't possible cleanly).
+el10_baseline_ip_forward_enabled: false
+
+el10_baseline_sysctl_settings:
+  net.ipv4.conf.all.send_redirects: 0
+  net.ipv4.conf.default.send_redirects: 0
+  net.ipv4.conf.all.accept_source_route: 0
+  net.ipv4.conf.default.accept_source_route: 0
+  net.ipv4.conf.all.accept_redirects: 0
+  net.ipv4.conf.default.accept_redirects: 0
+  net.ipv4.conf.all.secure_redirects: 0
+  net.ipv4.conf.default.secure_redirects: 0
+  net.ipv4.conf.all.log_martians: 1
+  net.ipv4.conf.default.log_martians: 1
+  net.ipv4.icmp_echo_ignore_broadcasts: 1
+  net.ipv4.icmp_ignore_bogus_error_responses: 1
+  net.ipv4.conf.all.rp_filter: 1
+  net.ipv4.conf.default.rp_filter: 1
+  net.ipv4.tcp_syncookies: 1
+  net.ipv6.conf.all.accept_ra: 0
+  net.ipv6.conf.default.accept_ra: 0
+  net.ipv6.conf.all.accept_redirects: 0
+  net.ipv6.conf.default.accept_redirects: 0
+  kernel.randomize_va_space: 2
+  fs.suid_dumpable: 0
+  kernel.core_uses_pid: 1
+  kernel.kptr_restrict: 2
+  kernel.dmesg_restrict: 1
+  kernel.yama.ptrace_scope: 1
+
+# --- Services: legacy/insecure services that must not be present (CIS 2.x) ----
+el10_baseline_disabled_services:
+  - telnet.socket
+  - rsh.socket
+  - rlogin.socket
+  - rexec.socket
+  - tftp.socket
+  - xinetd
+  - ypserv
+  - rpcbind
+
+el10_baseline_disallowed_packages:
+  - telnet-server
+  - rsh-server
+  - ypserv
+  - tftp-server
+  - xinetd
+
+# --- PAM / password quality (CIS 5.4.x) ---------------------------------------
+el10_baseline_pwquality_minlen: 15
+el10_baseline_pwquality_dcredit: -1
+el10_baseline_pwquality_ucredit: -1
+el10_baseline_pwquality_ocredit: -1
+el10_baseline_pwquality_lcredit: -1
+el10_baseline_pwquality_minclass: 4
+el10_baseline_pwquality_maxrepeat: 3
+el10_baseline_pwquality_dictcheck: 1
+el10_baseline_pwquality_enforce_for_root: true
+
+el10_baseline_faillock_deny: 5
+el10_baseline_faillock_unlock_time: 900
+el10_baseline_faillock_fail_interval: 900
+
+el10_baseline_password_remember: 24    # history — cannot reuse last 24 passwords
+
+# --- Account/login.defs (CIS 5.5.x) -------------------------------------------
+el10_baseline_pass_max_days: "{{ account_password_max_days | default(90) }}"
+el10_baseline_pass_min_days: 1
+el10_baseline_pass_warn_age: 7
+el10_baseline_uid_min: 1000
+
+# --- File permissions on sensitive files (CIS 6.1.x) --------------------------
+el10_baseline_sensitive_file_perms:
+  - { path: /etc/passwd,  mode: "0644", owner: root, group: root }
+  - { path: /etc/shadow,  mode: "0000", owner: root, group: root }
+  - { path: /etc/group,   mode: "0644", owner: root, group: root }
+  - { path: /etc/gshadow, mode: "0000", owner: root, group: root }
+  - { path: /etc/passwd-, mode: "0600", owner: root, group: root }
+  - { path: /etc/shadow-, mode: "0000", owner: root, group: root }
+  - { path: /etc/group-,  mode: "0644", owner: root, group: root }
+  - { path: /etc/gshadow-, mode: "0000", owner: root, group: root }
+  - { path: /boot/grub2/grub.cfg, mode: "0600", owner: root, group: root }
+
+# --- cron/at restriction (CIS 5.1.x) ------------------------------------------
+el10_baseline_cron_at_allow_users: []   # empty = only root, via /etc/cron.allow /etc/at.allow
+
+# --- default umask (CIS 5.6.x) ------------------------------------------------
+el10_baseline_default_umask: "027"

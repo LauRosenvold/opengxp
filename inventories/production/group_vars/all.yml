@@ -1,0 +1,107 @@
+---
+# Defaults for the entire production estate. Anything environment-specific
+# but not OS- or tier-specific goes here. Real secrets (activation keys,
+# join credentials, TLS material) must live in a `*.vault.yml` sibling file
+# encrypted with ansible-vault, never here in plaintext.
+
+environment_name: production
+
+# --- Automation account -------------------------------------------------------
+# Every playbook connects and becomes-from this account, never root — see
+# roles/automation_user and playbooks/provision_automation_user.yml. Must
+# match the `ansible_user:` value set in this environment's hosts.yml
+# (production/hosts.yml's `all.vars.ansible_user`) — the two live in
+# different files/precedence tiers on purpose (one is a connection
+# variable, one is a role variable) but they name the same account and
+# must be kept in sync if you ever rename it.
+automation_user_name: svc_ansible
+# Public keys only — never a private key, never in this repo at all.
+# Different environments should use different keypairs (segregate which
+# CI runner/bastion can reach staging vs production) — that's why this is
+# set per-environment here rather than once in a shared file.
+automation_user_ssh_public_keys: []
+# Example (uncomment and replace once a real CI-runner keypair exists):
+#   - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI... prod-ci-runner"   # CHANGEME
+automation_user_sudo_nopasswd: true
+
+# --- Red Hat Satellite / Capsule -------------------------------------------
+satellite_server: "satellite.gxp.example.internal"      # CHANGEME
+satellite_organization: "GxP-Enterprise"                 # CHANGEME
+satellite_capsule: "capsule-prod.gxp.example.internal"   # CHANGEME
+# satellite_activation_key lives in group_vars/all.vault.yml (ansible-vault)
+
+# --- Time sync --------------------------------------------------------------
+# GxP record timestamps are only as trustworthy as the clock that made them.
+# Point these at your own stratum-1/2 sources, not public pool.ntp.org, for
+# any gxp_critical host.
+ntp_servers:
+  - "ntp1.gxp.example.internal"   # CHANGEME
+  - "ntp2.gxp.example.internal"   # CHANGEME
+
+# --- Centralized logging / SIEM ---------------------------------------------
+# No SIEM target was specified yet. roles/logging_forward is inert (logs
+# locally only, TLS forward disabled) until this is set to a real value.
+syslog_forward_enabled: false
+syslog_forward_target: "CHANGEME-siem.gxp.example.internal"
+syslog_forward_port: 6514
+syslog_forward_protocol: "tls"          # rsyslog omfwd, TLS-wrapped TCP
+syslog_forward_ca_cert_src: "CHANGEME"  # local path to CA cert to push, if using cert auth
+
+# --- Identity (AD / IdM) -----------------------------------------------------
+# No directory service was named yet. roles/identity_sssd is inert (no
+# domain join attempted) until this is set to a real value. See
+# docs/IDENTITY.md for the fuller picture once you do: ID mapping choice,
+# qualified names, AD-group sudo mapping (roles/user_access_gxp), GPO
+# access control, GSSAPI SSH (roles/ssh_hardening).
+identity_backend_enabled: false
+identity_domain: "CHANGEME.gxp.example.internal"
+identity_backend: "ad"        # "ad" or "ipa"
+identity_allowed_groups: []
+#   - "gxp-linux-admins"   # CHANGEME — must resolve via `getent group` once joined; see docs/IDENTITY.md
+# identity_join_username / identity_join_password belong in an
+# ansible-vault encrypted group_vars/all.vault.yml, never here:
+#   identity_join_username: "{{ vault_identity_join_username }}"
+#   identity_join_password: "{{ vault_identity_join_password }}"
+
+# Defaults (identity_ad_id_mapping_enabled: true,
+# identity_use_fully_qualified_names: false,
+# identity_ad_gpo_access_control: permissive — see
+# roles/identity_sssd/defaults/main.yml) are reasonable for a
+# single-domain estate with no AD-side POSIX schema extension. Override
+# here only if that's not your situation.
+
+# --- Timezone / locale --------------------------------------------------------
+system_timezone: "UTC"        # Keep UTC fleet-wide; GxP timestamp evidence
+                               # should never depend on reconciling local TZ
+                               # across sites.
+system_locale: "en_US.UTF-8"
+
+# --- Login banner (legal/compliance text) ------------------------------------
+# Must be the exact text your Legal/Quality function has approved for
+# regulated systems. Placeholder below is NOT approved language — replace it.
+login_banner_text: |
+  WARNING: This system is for authorized use only. All activity is logged,
+  monitored, and subject to audit in accordance with company policy and
+  applicable GxP regulations. Unauthorized access is prohibited and may be
+  subject to disciplinary action and/or legal proceedings.
+
+# --- FIPS mode ----------------------------------------------------------------
+fips_mode_enabled: false   # flip per-tier in gxp_critical.yml if your
+                           # validation package requires FIPS-validated crypto
+
+# --- Hypervisor VM provisioning (vCenter) --------------------------------------
+# Applies to the explicit `localhost` inventory entry in hosts.yml, which
+# is what playbooks/provision_vm_vcenter.yml runs against (see
+# docs/PROVISIONING.md). vcenter_password belongs in an ansible-vault
+# encrypted group_vars/all.vault.yml, never here:
+#   vcenter_password: "{{ vault_vcenter_password }}"
+vcenter_hostname: "CHANGEME"       # e.g. vcenter.gxp.example.internal
+vcenter_username: "CHANGEME"
+vcenter_datacenter: "CHANGEME"
+vcenter_cluster: "CHANGEME"
+vcenter_datastore: "CHANGEME"
+vcenter_network_portgroup: "CHANGEME"
+# Per-VM specifics (vm_name, vcenter_template_name, sizing, networking)
+# are passed at invocation time via -e or a vars file, not set fleet-wide
+# here — see provisioning/vm_provision/defaults/main.yml and
+# docs/PROVISIONING.md for the full variable list and example.

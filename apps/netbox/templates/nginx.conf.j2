@@ -1,0 +1,27 @@
+# {{ ansible_managed | default('Managed by Ansible — apps/netbox') }}
+# nginx-unprivileged can't bind ports below 1024 — listens on 8443
+# internally, mapped to netbox_https_port (443 by default) on the host
+# side via the compose file's port mapping.
+server {
+    listen 8443 ssl;
+    server_name {{ netbox_allowed_hosts | join(' ') }};
+
+    ssl_certificate     /etc/nginx/tls/server.crt;
+    ssl_certificate_key /etc/nginx/tls/server.key;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_ciphers         HIGH:!aNULL:!MD5;
+
+    client_max_body_size 25m;
+
+    # Everything, including /static/, proxies through to netbox rather
+    # than being served directly by nginx from a shared volume — simpler
+    # and avoids a stale/empty-static-directory footgun, at a small
+    # performance cost. Revisit if this becomes an actual bottleneck.
+    location / {
+        proxy_pass http://netbox:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}

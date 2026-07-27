@@ -1,0 +1,23 @@
+# {{ ansible_managed | default('Managed by Ansible — server_roles/kubernetes_node') }}
+version = 2
+
+[plugins."io.containerd.grpc.v1.cri"]
+  sandbox_image = "{{ k8s_pause_image }}"
+
+  # container-selinux (installed by server_roles/docker_host or directly
+  # here) provides proper SELinux labeling for containers — this stays
+  # enabled because roles/selinux_enforce keeps SELinux enforcing
+  # fleet-wide and this repo does not disable it for Kubernetes nodes
+  # (see docs/SERVER_ROLES.md). If a workload hits an SELinux denial, fix
+  # the labeling/policy, don't disable enforcement here.
+  enable_selinux = true
+
+  [plugins."io.containerd.grpc.v1.cri".containerd]
+    # SystemdCgroup MUST match the kubelet's cgroup driver (systemd, the
+    # default and recommended value on any host using systemd — which is
+    # every host this repo manages). A mismatch here is one of the most
+    # common causes of a kubelet that starts but never goes Ready.
+    [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc]
+      runtime_type = "io.containerd.runc.v2"
+      [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc.options]
+        SystemdCgroup = true

@@ -1,0 +1,40 @@
+# {{ ansible_managed | default('Managed by Ansible — server_roles/kubernetes_node') }}
+# Minimal, reasonably-scoped audit policy: who did what against the API
+# server, when — the GxP-relevant question for a cluster running any
+# validated workload. Log request/response bodies only for the resources
+# where the body itself is the interesting part (RBAC, Secrets metadata
+# — not the Secret *values*, see the "Secrets" rule below); Metadata level
+# everywhere else keeps volume sane. Tune per your own risk assessment,
+# this is a sane default, not a mandate.
+apiVersion: audit.k8s.io/v1
+kind: Policy
+omitStages:
+  - "RequestReceived"
+rules:
+  # Never log request/response bodies for Secrets — metadata only (who
+  # touched which Secret, not its contents, which would otherwise land in
+  # a plaintext audit log).
+  - level: Metadata
+    resources:
+      - group: ""
+        resources: ["secrets"]
+
+  # RBAC changes: log the full request so "what permission was granted"
+  # is reconstructable from the audit trail.
+  - level: RequestResponse
+    resources:
+      - group: "rbac.authorization.k8s.io"
+        resources: ["roles", "rolebindings", "clusterroles", "clusterrolebindings"]
+
+  - level: RequestResponse
+    verbs: ["create", "update", "patch", "delete", "deletecollection"]
+    resources:
+      - group: ""
+        resources: ["pods", "services", "configmaps", "serviceaccounts", "namespaces"]
+      - group: "apps"
+        resources: ["deployments", "daemonsets", "statefulsets", "replicasets"]
+
+  - level: Metadata
+    verbs: ["get", "list", "watch"]
+
+  - level: Metadata

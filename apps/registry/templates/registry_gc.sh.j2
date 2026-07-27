@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# {{ ansible_managed | default('Managed by Ansible — apps/registry') }}
+#
+# Offline garbage collection: distribution/distribution's own docs call
+# out that running `registry garbage-collect` against a store still
+# being written to risks deleting a blob that's mid-upload. Simplest safe
+# approach for a private, off-hours-scheduled registry: stop it, run GC
+# via `docker compose run` against the same config/volumes, start it back
+# up. Downtime is brief and this only runs when registry_delete_enabled
+# is true in the first place.
+#
+# --delete-untagged=false: deliberately conservative — an image
+# referenced only by digest (common for a Kubernetes deployment pinned
+# to a specific digest, not a tag) has no tag pointing at it, but is
+# still very much in use. Don't remove it just because it's untagged.
+
+set -euo pipefail
+
+cd {{ registry_app_dir }}
+
+logger -t registry-gc "Starting garbage collection"
+docker compose stop registry
+docker compose run --rm registry garbage-collect --delete-untagged=false /etc/docker/registry/config.yml \
+  >> /var/log/registry-gc.log 2>&1
+docker compose start registry
+logger -t registry-gc "Garbage collection complete"

@@ -1,0 +1,54 @@
+# {{ ansible_managed | default('Managed by Ansible — provisioning/vm_provision') }}
+# Rendered once per run and executed on the Hyper-V host itself (via
+# WinRM) — see tasks/hyperv.yml. Idempotent: checks for an existing VM
+# by name before importing or removing anything.
+
+$ErrorActionPreference = "Stop"
+$vmName = "{{ vm_name }}"
+$existing = Get-VM -Name $vmName -ErrorAction SilentlyContinue
+
+{% if vm_state == 'absent' %}
+if ($existing) {
+    Write-Output "Stopping and removing $vmName"
+    Stop-VM -Name $vmName -TurnOff -Force -ErrorAction SilentlyContinue
+    $vhds = (Get-VMHardDiskDrive -VMName $vmName).Path
+    Remove-VM -Name $vmName -Force
+    foreach ($vhd in $vhds) {
+        if (Test-Path $vhd) {
+            Remove-Item -Path $vhd -Force
+        }
+    }
+    Write-Output "CHANGED: removed $vmName and its disks"
+} else {
+    Write-Output "OK: $vmName does not exist, nothing to remove"
+}
+{% else %}
+if ($existing) {
+    Write-Output "OK: $vmName already exists, not re-importing from template"
+} else {
+    Write-Output "Importing $vmName from template at {{ hyperv_template_export_path }}"
+
+    $importedVm = Import-VM -Path "{{ hyperv_template_export_path }}" -Copy -GenerateNewId `
+        -VirtualMachinePath "{{ hyperv_vm_path }}" `
+        -VhdDestinationPath "{{ hyperv_vhd_path }}"
+
+    Rename-VM -VM $importedVm -NewName $vmName
+    Set-VMProcessor -VMName $vmName -Count {{ vm_cpu_count }}
+    Set-VMMemory -VMName $vmName -StartupBytes {{ vm_memory_mb }}MB -DynamicMemoryEnabled $false
+
+    $adapter = Get-VMNetworkAdapter -VMName $vmName | Select-Object -First 1
+    Connect-VMNetworkAdapter -VMNetworkAdapter $adapter -SwitchName "{{ hyperv_switch_name }}"
+{% if hyperv_static_mac_address | length > 0 %}
+    Set-VMNetworkAdapter -VMName $vmName -StaticMacAddress "{{ hyperv_static_mac_address }}"
+{% endif %}
+
+{% if vm_extra_disk_gb | int > 0 %}
+    $extraVhdPath = Join-Path "{{ hyperv_vhd_path }}" "$vmName-data.vhdx"
+    New-VHD -Path $extraVhdPath -SizeBytes {{ vm_extra_disk_gb }}GB -Dynamic | Out-Null
+    Add-VMHardDiskDrive -VMName $vmName -Path $extraVhdPath
+{% endif %}
+
+    Start-VM -Name $vmName
+    Write-Output "CHANGED: imported, configured, and started $vmName"
+}
+{% endif %}

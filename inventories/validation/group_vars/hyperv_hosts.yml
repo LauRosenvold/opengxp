@@ -1,0 +1,32 @@
+---
+# CANONICAL COPY LIVES IN inventories/production/group_vars/hyperv_hosts.yml
+# This is the IQ/OQ/PQ execution environment (see docs/VALIDATION.md) —
+# it must match production control policy exactly.
+#
+# Overrides the `all:vars:` block in hosts.yml (ansible_user: svc_ansible,
+# ansible_become: true) — those are SSH/sudo concepts that don't apply to
+# a Windows host. This is what actually makes `hosts: all:!hyperv_hosts`
+# in the core playbooks meaningful rather than just documentation: even
+# if someone forgot the exclusion somewhere, these hosts still wouldn't
+# connect the way an SSH-based task expects.
+ansible_connection: winrm
+ansible_port: 5986
+ansible_winrm_transport: ntlm
+# Kerberos is the better choice once this Hyper-V host is itself
+# domain-joined and you're already running AD elsewhere in this estate
+# (see docs/IDENTITY.md) — set to "kerberos" and add the matching
+# ansible_winrm_* realm vars if so. CredSSP (double-hop auth) is only
+# needed if hyperv_template_export_path points at a network share rather
+# than a local path on the Hyper-V host itself — see docs/PROVISIONING.md.
+ansible_winrm_server_cert_validation: validate
+# "ignore" is for a known lab WinRM listener using a self-signed cert
+# only — same posture as every other TLS default in this repo
+# (secure-by-default, documented opt-out for lab use, never silently
+# insecure in what ships).
+
+# Vaulted — a Windows local admin or domain admin account with rights to
+# manage Hyper-V on this host. No default: an empty ansible_password
+# just fails the connection outright, which is the correct "fail loud"
+# behavior here.
+ansible_user: "CHANGEME"
+ansible_password: ""

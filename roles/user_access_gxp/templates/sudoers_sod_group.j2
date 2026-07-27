@@ -1,0 +1,2 @@
+# {{ ansible_managed | default('Managed by Ansible — roles/user_access_gxp') }}
+%{{ group.name }} ALL=(ALL) {{ 'ALL' if 'ALL' in group.commands else group.commands | join(', ') }}

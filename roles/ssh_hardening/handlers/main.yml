@@ -1,0 +1,8 @@
+---
+- name: Restart sshd
+  ansible.builtin.systemd:
+    name: sshd
+    state: restarted
+  # sshd_config's `validate` on the template task already runs `sshd -t`
+  # before this file replaces the live config, so a bad config never gets
+  # here — this handler only fires on an already-known-valid file.

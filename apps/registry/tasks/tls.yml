@@ -1,0 +1,73 @@
+---
+- name: Ensure the TLS directory exists
+  ansible.builtin.file:
+    path: "{{ registry_tls_dir }}"
+    state: directory
+    owner: "{{ registry_container_uid }}"
+    group: "{{ registry_container_uid }}"
+    mode: "0750"
+
+- name: Deploy a real TLS certificate and key, if supplied
+  ansible.builtin.copy:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    owner: "{{ registry_container_uid }}"
+    group: "{{ registry_container_uid }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - { src: "{{ registry_ssl_cert_src }}", dest: "{{ registry_tls_dir }}/server.crt", mode: "0644" }
+    - { src: "{{ registry_ssl_key_src }}", dest: "{{ registry_tls_dir }}/server.key", mode: "0640" }
+  loop_control:
+    label: "{{ item.dest }}"
+  when:
+    - registry_ssl_cert_src | length > 0
+    - registry_ssl_key_src | length > 0
+  notify: Restart registry
+  # Unlike apps/netbox's TLS files, this key can stay 0640 rather than
+  # 0644: only one container (registry itself, no reverse proxy in this
+  # stack) ever needs to read it, and it runs as the same UID this file
+  # is owned by.
+
+- name: Check whether a self-signed certificate already exists
+  ansible.builtin.stat:
+    path: "{{ registry_tls_dir }}/server.crt"
+  register: registry_selfsigned_cert_stat
+  when: registry_ssl_cert_src | length == 0
+
+- name: Warn that a self-signed certificate is being generated
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: registry_ssl_cert_src/key_src are empty on
+      {{ inventory_hostname }} — generating a self-signed certificate.
+      Fine for lab/staging; for a real registry you'll also need to
+      distribute this cert as a trusted CA to every Docker host that
+      pulls from it (see server_roles/docker_host's
+      docker_trusted_registry_cas) rather than resorting to
+      insecure-registries. A real CA-issued cert avoids that distribution
+      step entirely if your org already has one — see docs/APPS.md.
+  when:
+    - registry_ssl_cert_src | length == 0
+    - not registry_selfsigned_cert_stat.stat.exists
+
+- name: Generate a self-signed certificate and key
+  ansible.builtin.command: >
+    openssl req -new -x509 -days {{ registry_ssl_self_signed_days }}
+    -nodes -text
+    -out {{ registry_tls_dir }}/server.crt
+    -keyout {{ registry_tls_dir }}/server.key
+    -subj "/CN={{ registry_hostname }}"
+  when:
+    - registry_ssl_cert_src | length == 0
+    - not registry_selfsigned_cert_stat.stat.exists
+  changed_when: true
+  notify: Restart registry
+
+- name: Ensure correct ownership/permissions on the certificate and key
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    owner: "{{ registry_container_uid }}"
+    group: "{{ registry_container_uid }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - { path: "{{ registry_tls_dir }}/server.crt", mode: "0644" }
+    - { path: "{{ registry_tls_dir }}/server.key", mode: "0640" }

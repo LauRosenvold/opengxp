@@ -1,0 +1,89 @@
+---
+# Only ever invoked via playbooks/kubernetes_upgrade.yml with
+# --tags upgrade — see this repo's `never` tag convention
+# (roles/fips_mode uses the same "explicit confirmation extra-var" gate
+# for the same reason: a disruptive, change-controlled action that must
+# never happen as a side effect of a routine run). Test in staging first,
+# always — a kubeadm upgrade is not something to improvise on production.
+
+- name: Fail loudly unless the upgrade was explicitly confirmed
+  ansible.builtin.assert:
+    that:
+      - k8s_upgrade_confirmed | bool
+      - k8s_target_version_full is defined
+      - k8s_target_version_full | length > 0
+    fail_msg: >-
+      Re-run with -e k8s_upgrade_confirmed=true -e
+      k8s_target_version_full=<full version, e.g. 1.31.4> — see
+      playbooks/kubernetes_upgrade.yml.
+
+- name: Remove versionlock so the upgrade can actually install a new version
+  ansible.builtin.command: dnf versionlock delete kubeadm kubelet kubectl
+  register: k8s_versionlock_remove_result
+  changed_when: "'Deleting versionlock' in k8s_versionlock_remove_result.stdout"
+  failed_when: false   # nothing to delete on a host with no prior lock is not an error
+  when: k8s_versionlock_enabled | bool
+
+- name: Upgrade the kubeadm package to the target version
+  ansible.builtin.dnf:
+    name: "kubeadm-{{ k8s_target_version_full }}"
+    state: present
+    allow_downgrade: true
+
+- name: Run kubeadm upgrade plan (informational, first control-plane node only)
+  ansible.builtin.command: kubeadm upgrade plan
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: k8s_upgrade_plan_result
+  changed_when: false
+  when: inventory_hostname == (groups['k8s_control_plane'] | first)
+
+- name: Show the upgrade plan
+  ansible.builtin.debug:
+    msg: "{{ k8s_upgrade_plan_result.stdout_lines }}"
+  when: inventory_hostname == (groups['k8s_control_plane'] | first)
+
+- name: Apply the upgrade on the first control-plane node
+  ansible.builtin.command: "kubeadm upgrade apply -y v{{ k8s_target_version_full }}"
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  when: inventory_hostname == (groups['k8s_control_plane'] | first)
+  changed_when: true
+
+- name: Run kubeadm upgrade node (all other control-plane nodes and every worker)
+  ansible.builtin.command: kubeadm upgrade node
+  when: inventory_hostname != (groups['k8s_control_plane'] | first)
+  changed_when: true
+
+- name: Drain this node before touching its kubelet
+  ansible.builtin.command: >
+    kubectl --kubeconfig=/etc/kubernetes/admin.conf drain {{ inventory_hostname }}
+    --ignore-daemonsets --delete-emptydir-data --force --timeout=180s
+  delegate_to: "{{ groups['k8s_control_plane'] | first }}"
+  changed_when: true
+
+- name: Upgrade kubelet and kubectl to the target version
+  ansible.builtin.dnf:
+    name:
+      - "kubelet-{{ k8s_target_version_full }}"
+      - "kubectl-{{ k8s_target_version_full }}"
+    state: present
+    allow_downgrade: true
+
+- name: Restart kubelet
+  ansible.builtin.systemd:
+    name: kubelet
+    state: restarted
+    daemon_reload: true
+
+- name: Uncordon this node now that its kubelet is back
+  ansible.builtin.command: >
+    kubectl --kubeconfig=/etc/kubernetes/admin.conf uncordon {{ inventory_hostname }}
+  delegate_to: "{{ groups['k8s_control_plane'] | first }}"
+  changed_when: true
+
+- name: Re-apply versionlock at the new version
+  ansible.builtin.command: dnf versionlock add kubeadm kubelet kubectl
+  register: k8s_versionlock_reapply_result
+  changed_when: "'Adding versionlock' in k8s_versionlock_reapply_result.stdout"
+  when: k8s_versionlock_enabled | bool

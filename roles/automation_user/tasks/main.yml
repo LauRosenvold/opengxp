@@ -1,0 +1,61 @@
+---
+- name: Fail loudly if no SSH public key was supplied
+  ansible.builtin.assert:
+    that:
+      - automation_user_ssh_public_keys is defined
+      - automation_user_ssh_public_keys | length > 0
+    fail_msg: >-
+      automation_user_ssh_public_keys is empty. Populate it in
+      inventories/<env>/group_vars/all.yml with at least one public key
+      (public keys are not secret, fine to commit) before this account can
+      be reached by anything. Refusing to create an unreachable,
+      locked-password account.
+
+- name: Create the automation service group
+  ansible.builtin.group:
+    name: "{{ automation_user_group }}"
+    system: "{{ automation_user_system }}"
+    state: present
+
+- name: Create the automation service user
+  ansible.builtin.user:
+    name: "{{ automation_user_name }}"
+    group: "{{ automation_user_group }}"
+    comment: "{{ automation_user_comment }}"
+    shell: "{{ automation_user_shell }}"
+    home: "{{ automation_user_home }}"
+    system: "{{ automation_user_system }}"
+    create_home: true
+    password: "!!"        # locked — SSH key is the only way in, ever
+    password_lock: true
+    state: present
+
+- name: Ensure the home directory has restrictive permissions
+  ansible.builtin.file:
+    path: "{{ automation_user_home }}"
+    state: directory
+    owner: "{{ automation_user_name }}"
+    group: "{{ automation_user_group }}"
+    mode: "0750"
+
+- name: Deploy authorized SSH keys (exclusive — anything not listed is removed)
+  ansible.posix.authorized_key:
+    user: "{{ automation_user_name }}"
+    key: "{{ automation_user_ssh_public_keys | join('\n') }}"
+    exclusive: "{{ automation_user_authorized_keys_exclusive }}"
+    state: present
+
+- name: Grant sudo access via a dedicated sudoers.d file
+  ansible.builtin.template:
+    src: sudoers_automation_user.j2
+    dest: "/etc/sudoers.d/00-{{ automation_user_name }}"
+    owner: root
+    group: root
+    mode: "0440"
+    validate: "visudo -cf %s"
+
+- name: Verify the account can actually be used for privilege escalation
+  ansible.builtin.command: id "{{ automation_user_name }}"
+  register: automation_user_id_check
+  changed_when: false
+  failed_when: automation_user_id_check.rc != 0

@@ -1,0 +1,89 @@
+# {{ ansible_managed | default('Managed by Ansible — apps/netbox') }}
+# Hand-built, simplified reconstruction of a netbox-docker-style stack —
+# not a checkout of github.com/netbox-community/netbox-docker itself.
+# That repo's real compose setup splits across several override files
+# and env-file-per-service; this collapses it to one file for
+# maintainability inside this Ansible role. Cross-check against upstream
+# if you need a feature this doesn't cover (LDAP/SSO sidecar, etc.).
+
+services:
+  netbox:
+    image: {{ netbox_image }}
+    depends_on:
+      - redis
+      - redis-cache
+{% if not netbox_external_database_enabled %}
+      - postgres
+{% endif %}
+    env_file: .env
+    volumes:
+      - {{ netbox_data_dir }}/netbox/media:/opt/netbox/netbox/media:rw
+      - {{ netbox_data_dir }}/netbox/reports:/opt/netbox/netbox/reports:rw
+      - {{ netbox_data_dir }}/netbox/scripts:/opt/netbox/netbox/scripts:rw
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/login/"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 90s
+    restart: unless-stopped
+
+  netbox-worker:
+    image: {{ netbox_image }}
+    command: /opt/netbox/venv/bin/python /opt/netbox/netbox/manage.py rqworker
+    depends_on:
+      - netbox
+    env_file: .env
+    volumes:
+      - {{ netbox_data_dir }}/netbox/media:/opt/netbox/netbox/media:rw
+      - {{ netbox_data_dir }}/netbox/reports:/opt/netbox/netbox/reports:rw
+      - {{ netbox_data_dir }}/netbox/scripts:/opt/netbox/netbox/scripts:rw
+    restart: unless-stopped
+
+  netbox-housekeeping:
+    image: {{ netbox_image }}
+    command: /opt/netbox/housekeeping.sh
+    depends_on:
+      - netbox
+    env_file: .env
+    restart: unless-stopped
+
+  redis:
+    image: {{ netbox_redis_image }}
+    command: ["sh", "-c", "redis-server --appendonly yes --requirepass \"$$REDIS_PASSWORD\""]
+    env_file: .env
+    volumes:
+      - {{ netbox_data_dir }}/redis:/data:rw
+    restart: unless-stopped
+
+  redis-cache:
+    image: {{ netbox_redis_image }}
+    command: ["sh", "-c", "redis-server --requirepass \"$$REDIS_CACHE_PASSWORD\""]
+    env_file: .env
+    volumes:
+      - {{ netbox_data_dir }}/redis-cache:/data:rw
+    restart: unless-stopped
+
+{% if not netbox_external_database_enabled %}
+  postgres:
+    image: {{ netbox_postgres_image }}
+    env_file: .env
+    volumes:
+      - {{ netbox_data_dir }}/postgres:/var/lib/postgresql/data:rw
+    restart: unless-stopped
+{% endif %}
+
+  nginx:
+    image: {{ netbox_nginx_image }}
+    depends_on:
+      - netbox
+    ports:
+      - "{{ netbox_https_port }}:8443"
+    volumes:
+      - {{ netbox_tls_dir }}:/etc/nginx/tls:ro
+      - {{ netbox_app_dir }}/nginx.conf:/etc/nginx/conf.d/netbox.conf:ro
+    restart: unless-stopped
+
+networks:
+  default:
+    name: netbox

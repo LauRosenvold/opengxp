@@ -1,0 +1,59 @@
+---
+# --- sudo session logging (GxP: who did what, as whom, when) -----------------
+user_access_sudo_log_input: true
+user_access_sudo_log_output: true
+user_access_sudo_logfile: /var/log/sudo.log
+user_access_sudo_iolog_dir: /var/log/sudo-io
+user_access_sudo_passwd_tries: 3
+user_access_sudo_timestamp_timeout: 5   # minutes before re-prompting for password
+
+# --- Segregation of duties groups --------------------------------------------
+# Each entry gets a sudoers.d file restricting that group to a specific
+# command set — nobody gets blanket root via `wheel` in this design.
+# Extend per your actual duty separation (app admins vs DB admins vs
+# security admins should not share a sudo command set).
+#
+# `source: local` (default when omitted) creates the group with
+# ansible.builtin.group, same as always. `source: directory` skips that
+# — the group is expected to already exist via roles/identity_sssd (an
+# AD security group, resolved through SSSD), and this role only writes
+# the sudoers.d entry referencing it. See docs/IDENTITY.md for the
+# qualified-names/spaces-in-AD-group-names caveats that apply specifically
+# to directory-sourced entries.
+user_access_sod_groups:
+  - name: gxp-app-admins
+    source: local
+    commands:
+      - /usr/bin/systemctl restart app*
+      - /usr/bin/systemctl status *
+      - /usr/bin/journalctl *
+  - name: gxp-db-admins
+    source: local
+    commands:
+      - /usr/bin/systemctl restart postgresql*
+      - /usr/bin/systemctl status *
+  - name: gxp-security-admins
+    source: local
+    commands:
+      - ALL   # this group intentionally gets full sudo — that IS its duty
+# Example directory-sourced (AD) entry — uncomment and adjust once
+# roles/identity_sssd has joined a domain. The group name here must
+# match how it resolves via `getent group` on this host (plain short
+# name if identity_use_fully_qualified_names is false, the default):
+#   - name: gxp-linux-admins
+#     source: directory
+#     commands:
+#       - ALL
+
+# --- Break-glass local emergency accounts ------------------------------------
+# Only used when centralized identity (roles/identity_sssd) is
+# unreachable. Passwords are locked by default — unlocking one for actual
+# emergency use is a manual, ticketed, logged action outside Ansible, not
+# something this role automates (automating it would defeat the point of
+# a break-glass procedure having a paper trail).
+user_access_break_glass_accounts: []
+# Example:
+#   - name: breakglass-root
+#     uid: 900
+#     group: gxp-security-admins
+#     ssh_authorized_key: ""   # populate via vault if key-based emergency access is wanted

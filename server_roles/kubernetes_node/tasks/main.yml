@@ -1,0 +1,64 @@
+---
+# Deliberately ONE flat task list applied to the whole
+# k8s_control_plane:k8s_workers play (see playbooks/kubernetes_cluster.yml)
+# rather than split across several plays. Ansible's linear strategy
+# synchronizes every host at each task boundary — so "prep every node"
+# fully finishes fleet-wide before "init the first control-plane node"
+# starts, which fully finishes before "join everyone else" starts, purely
+# from task ORDER plus the `when` guards inside each included file. Don't
+# add `serial:` to that play, and don't split this into multiple plays —
+# either would risk breaking that ordering guarantee.
+
+- name: Configure the Kubernetes package repo (CRI-agnostic)
+  ansible.builtin.include_tasks: repo.yml
+  tags: [prep]
+
+- name: Configure containerd as the container runtime
+  ansible.builtin.include_tasks: containerd.yml
+  tags: [prep]
+  when: k8s_container_runtime == 'containerd'
+
+- name: Configure CRI-O as the container runtime
+  ansible.builtin.include_tasks: crio.yml
+  tags: [prep]
+  when: k8s_container_runtime == 'crio'
+
+- name: Common node preparation (swap, kernel modules, sysctl)
+  ansible.builtin.include_tasks: node_prep.yml
+  tags: [prep]
+
+- name: Initialize the first control-plane node / regenerate join tokens
+  ansible.builtin.include_tasks: control_plane_init.yml
+  tags: [control-plane]
+  when: "'k8s_control_plane' in group_names"
+
+- name: Join additional control-plane nodes (HA control plane only)
+  ansible.builtin.include_tasks: control_plane_join.yml
+  tags: [control-plane]
+  when: "'k8s_control_plane' in group_names"
+
+- name: Install the CNI
+  ansible.builtin.include_tasks: cni.yml
+  tags: [cni]
+  when:
+    - "'k8s_control_plane' in group_names"
+    - k8s_cni_enabled | bool
+
+- name: Install MetalLB
+  ansible.builtin.include_tasks: metallb.yml
+  tags: [metallb]
+  when:
+    - "'k8s_control_plane' in group_names"
+    - k8s_metallb_enabled | bool
+
+- name: Join worker nodes
+  ansible.builtin.include_tasks: worker_join.yml
+  tags: [worker]
+  when: "'k8s_workers' in group_names"
+
+- name: Upgrade this node to a new Kubernetes version
+  ansible.builtin.include_tasks: upgrade.yml
+  tags: [upgrade, never]
+  # `never`: only runs via `--tags upgrade`, from
+  # playbooks/kubernetes_upgrade.yml — see tasks/upgrade.yml's own header
+  # comment for why.

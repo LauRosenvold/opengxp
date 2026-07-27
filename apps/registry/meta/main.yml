@@ -1,0 +1,17 @@
+---
+galaxy_info:
+  role_name: registry
+  description: >-
+    Private Docker/OCI registry (distribution/distribution) deployed on
+    top of an already-provisioned server_roles/docker_host. Native TLS
+    termination, mandatory htpasswd auth, filesystem storage on a
+    bind-mounted host path, image deletion off by default (GxP
+    immutability), optional offline garbage-collection cron, optional
+    web UI. Lives in apps/, a third tier below server_roles/ — see
+    docs/APPS.md.
+  license: Apache-2.0
+  min_ansible_version: "2.15"
+  platforms:
+    - name: EL
+      versions: ["9", "10"]
+dependencies: []

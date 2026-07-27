@@ -1,0 +1,23 @@
+---
+# Application deployment, not part of playbooks/site.yml — see
+# docs/APPS.md. Assumes:
+#   1. This host has already been through playbooks/site.yml (hardened).
+#   2. playbooks/docker_host.yml has already run against it — every host
+#      in registry_hosts should also be in docker_hosts.
+#
+# Once this is running, point other roles' registry-mirror/image-source
+# CHANGEME vars at it — see docs/APPS.md's cross-reference section — and
+# distribute its TLS cert to other Docker hosts via
+# server_roles/docker_host's docker_trusted_registry_cas.
+#
+# Usage:
+#   ansible-playbook playbooks/registry.yml \
+#     -i inventories/staging/hosts.yml --check --diff
+
+- name: Deploy a private Docker/OCI registry
+  hosts: registry_hosts
+  become: true
+
+  roles:
+    - role: registry
+      tags: [registry]

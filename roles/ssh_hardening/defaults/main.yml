@@ -1,0 +1,69 @@
+---
+ssh_port: 22
+ssh_listen_addresses: []          # empty = listen on all; set explicitly for multi-homed hosts
+
+ssh_permit_root_login: "no"
+ssh_password_authentication: "no"  # key-based only; pair with identity_sssd for centralized key/cert auth
+ssh_permit_empty_passwords: "no"
+ssh_x11_forwarding: "no"
+ssh_max_auth_tries: 4
+ssh_max_sessions: 10
+ssh_login_grace_time: 60
+ssh_log_level: VERBOSE            # VERBOSE logs key fingerprints on auth — needed for GxP audit trail
+ssh_ignore_rhosts: true
+ssh_hostbased_authentication: "no"
+ssh_permit_user_environment: "no"
+ssh_use_pam: "yes"
+ssh_allow_tcp_forwarding: "no"
+ssh_allow_agent_forwarding: "no"
+ssh_compression: "no"
+
+# ssh_client_alive_interval / ssh_client_alive_count_max are intentionally
+# NOT set here. They come from the gxp_tier group_vars
+# (gxp_critical.yml / gxp_standard.yml), which sets them as plain global
+# vars of the same name — group_vars already outrank role defaults in
+# Ansible's precedence order, so redefining them here would either be a
+# no-op or (if self-referenced) a recursive-template error. The template
+# applies `| default(300)` / `| default(0)` directly as a safety net for
+# any host that somehow isn't in either tier group.
+
+# CIS-recommended, FIPS-140-3-compatible algorithm sets. Re-review against
+# the current CIS benchmark and your crypto office's approved list before
+# relying on this verbatim — algorithm guidance moves faster than most of
+# the rest of a hardening baseline.
+ssh_ciphers:
+  - aes256-gcm@openssh.com
+  - aes128-gcm@openssh.com
+  - aes256-ctr
+  - aes192-ctr
+  - aes128-ctr
+ssh_macs:
+  - hmac-sha2-512-etm@openssh.com
+  - hmac-sha2-256-etm@openssh.com
+  - hmac-sha2-512
+  - hmac-sha2-256
+ssh_kex_algorithms:
+  - curve25519-sha256
+  - curve25519-sha256@libssh.org
+  - diffie-hellman-group16-sha512
+  - diffie-hellman-group18-sha512
+
+ssh_allow_users: []               # e.g. ["deploy", "@admins"] — empty = no AllowUsers directive
+ssh_allow_groups: []
+ssh_deny_users: []
+ssh_deny_groups: []
+
+ssh_banner_path: /etc/issue.net   # populated by roles/common — kept as one source of truth
+
+ssh_remove_weak_moduli: true      # strip any /etc/ssh/moduli entries < 3072 bits
+ssh_moduli_min_bits: 3071         # comparison is "greater than", so 3071 keeps 3072-bit and up
+
+# Kerberos single sign-on for domain users (pairs with roles/identity_sssd
+# — realmd's domain join already deposits a working /etc/krb5.keytab, so
+# there's no separate keytab-distribution step this role needs to do).
+# Off by default: it only works when the client machine's clock is tight
+# with the KDC (roles/chrony_time handles that already, but it's still a
+# real prerequisite, not automatic) and DNS resolves the realm correctly
+# — turn on deliberately once you've confirmed both, not fleet-wide as a
+# default. See docs/IDENTITY.md.
+ssh_gssapi_auth_enabled: false

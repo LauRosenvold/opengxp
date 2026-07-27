@@ -1,0 +1,21 @@
+---
+# CANONICAL COPY LIVES IN inventories/production/group_vars/k8s_control_plane.yml
+# See the note in validation/group_vars/rhel9.yml — same rule applies here.
+#
+# Control-plane-specific ports. These are zone-wide opens within
+# roles/firewalld_baseline's default-deny zone, not source-restricted to
+# "only other cluster members" — tightening that further would need
+# firewalld rich-rules keyed on the other nodes' IPs, which isn't
+# implemented here (documented gap, see docs/SERVER_ROLES.md, in the same
+# spirit as server_roles/docker_host's DOCKER-USER caveat).
+firewalld_rules:
+  - { port: "6443/tcp" }        # kube-apiserver
+  - { port: "2379-2380/tcp" }   # etcd client/peer — control-plane nodes only ever talk to each other on this
+  - { port: "10250/tcp" }       # kubelet API
+  - { port: "10257/tcp" }       # kube-controller-manager
+  - { port: "10259/tcp" }       # kube-scheduler
+  # --- CNI/add-on ports, only relevant depending on choices in
+  # group_vars/k8s_nodes.yml — remove whichever don't apply to you:
+  - { port: "8472/udp" }        # Flannel VXLAN backend (k8s_cni_provider: flannel) — remove if using Calico
+  - { port: "7946/tcp" }        # MetalLB memberlist (k8s_metallb_enabled: true) — remove if MetalLB is off
+  - { port: "7946/udp" }        # MetalLB memberlist

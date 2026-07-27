@@ -1,0 +1,14 @@
+---
+galaxy_info:
+  role_name: automation_user
+  description: >-
+    Creates the dedicated, non-root local account every playbook in this
+    repo connects and becomes-from (key-only auth, locked password,
+    NOPASSWD sudo, heavily audited via roles/user_access_gxp's sudo
+    logging).
+  license: Apache-2.0
+  min_ansible_version: "2.15"
+  platforms:
+    - name: EL
+      versions: ["9", "10"]
+dependencies: []

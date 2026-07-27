@@ -1,0 +1,15 @@
+---
+# CANONICAL COPY LIVES IN inventories/production/group_vars/rhel10.yml
+# See the note in validation/group_vars/rhel9.yml — same rule applies here.
+#
+# Vars specific to the rhel10 inventory group.
+
+ansible_python_interpreter: /usr/bin/python3.12
+
+# roles/cis_hardening dispatches on this. As of authoring, RHEL10-CIS has
+# no tagged stable release (see requirements.yml note) — use the hand-built
+# fallback role instead. Flip to "lockdown_role" once you've validated a
+# tagged ansible-lockdown.RHEL10-CIS release and updated requirements.yml
+# to pin it.
+cis_hardening_engine: "fallback_role"
+cis_hardening_role_name: "el10_baseline_hardening"

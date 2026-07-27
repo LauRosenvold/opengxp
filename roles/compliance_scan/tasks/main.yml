@@ -1,0 +1,91 @@
+---
+- name: Ensure OpenSCAP and the security guide content are installed
+  ansible.builtin.dnf:
+    name:
+      - openscap-scanner
+      - scap-security-guide
+    state: present
+
+- name: List candidate datastream files for this host's major version
+  ansible.builtin.set_fact:
+    compliance_scan_datastream_candidates: >-
+      {{ compliance_scan_datastream_candidates_by_major_version[ansible_distribution_major_version] | default([]) }}
+
+- name: Check which candidate datastream files actually exist
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  register: compliance_scan_ds_stat_results
+  loop: "{{ compliance_scan_datastream_candidates }}"
+  when: compliance_scan_datastream_candidates | length > 0
+
+- name: Resolve the first candidate datastream that exists
+  ansible.builtin.set_fact:
+    compliance_scan_datastream: >-
+      {{ (compliance_scan_ds_stat_results.results | default([])
+          | selectattr('stat.exists', 'defined')
+          | selectattr('stat.exists')
+          | map(attribute='item') | list | first) | default('') }}
+
+- name: Warn and skip when no SCAP content is available for this OS/distro
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: no usable SCAP datastream found for
+      {{ inventory_hostname }} ({{ ansible_distribution }}
+      {{ ansible_distribution_major_version }}; checked
+      {{ compliance_scan_datastream_candidates | join(', ') }}). Skipping
+      the scan for this host — expected until scap-security-guide ships
+      content for this OS (see docs/BASELINE_MAPPING.md). Track it as an
+      open item, don't treat the absence of a report as "compliant."
+  when: compliance_scan_datastream | length == 0
+
+- name: Run OpenSCAP evaluation and generate evidence
+  when: compliance_scan_datastream | length > 0
+  block:
+    - name: Ensure the remote report directory exists
+      ansible.builtin.file:
+        path: "{{ compliance_scan_remote_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0750"
+
+    - name: Evaluate the CIS profile
+      ansible.builtin.command: >
+        oscap xccdf eval
+        --profile {{ compliance_scan_profile }}
+        --results {{ compliance_scan_remote_dir }}/results-{{ inventory_hostname }}-{{ ansible_date_time.date }}.xml
+        --report {{ compliance_scan_remote_dir }}/report-{{ inventory_hostname }}-{{ ansible_date_time.date }}.html
+        {{ compliance_scan_datastream }}
+      register: compliance_scan_result
+      changed_when: false
+      # oscap exits 2 when one or more rules fail evaluation — that's the
+      # expected "here's your compliance gap list" outcome, not a task
+      # failure. Only rc >2 (or a crash) is an actual tooling problem.
+      failed_when: compliance_scan_result.rc not in [0, 2]
+
+    - name: Ensure a local artifact directory exists for this host
+      ansible.builtin.file:
+        path: "{{ compliance_scan_local_artifact_dir }}/{{ inventory_hostname }}"
+        state: directory
+        mode: "0750"
+      delegate_to: localhost
+      become: false
+
+    - name: Fetch the HTML report back to the control node
+      ansible.builtin.fetch:
+        src: "{{ compliance_scan_remote_dir }}/report-{{ inventory_hostname }}-{{ ansible_date_time.date }}.html"
+        dest: "{{ compliance_scan_local_artifact_dir }}/{{ inventory_hostname }}/"
+        flat: true
+
+    - name: Fetch the XML results back to the control node
+      ansible.builtin.fetch:
+        src: "{{ compliance_scan_remote_dir }}/results-{{ inventory_hostname }}-{{ ansible_date_time.date }}.xml"
+        dest: "{{ compliance_scan_local_artifact_dir }}/{{ inventory_hostname }}/"
+        flat: true
+
+    - name: Report scan outcome
+      ansible.builtin.debug:
+        msg: >-
+          OpenSCAP evaluation finished for {{ inventory_hostname }}
+          (rc={{ compliance_scan_result.rc }}, 0=all rules passed,
+          2=some rules failed — see the fetched report for details).

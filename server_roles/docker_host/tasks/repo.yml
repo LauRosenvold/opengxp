@@ -1,0 +1,42 @@
+---
+- name: Determine whether we're falling back to Docker's public repo
+  ansible.builtin.set_fact:
+    docker_using_public_repo: "{{ docker_repo_baseurl == 'CHANGEME' }}"
+
+- name: Warn when bypassing Satellite for Docker CE content
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: docker_repo_baseurl is still CHANGEME on
+      {{ inventory_hostname }} — falling back to Docker's public repo
+      (download.docker.com) instead of a Satellite-managed content view.
+      Fine for a lab/evaluation host; on a real estate every other package
+      is patched through Satellite (see roles/satellite_registration) and
+      this one package family currently isn't — a real gap for
+      change-control/air-gap purposes. Sync Docker CE into a Satellite
+      custom product and set docker_repo_baseurl/docker_repo_gpgkey once
+      that content view exists (see docs/SERVER_ROLES.md).
+  when: docker_using_public_repo
+
+- name: Install Docker's public repo definition (fallback only)
+  ansible.builtin.get_url:
+    url: >-
+      {{ docker_public_repo_url_by_distro[ansible_distribution]
+         | default(docker_public_repo_url_by_distro['RedHat']) }}
+    dest: /etc/yum.repos.d/docker-ce.repo
+    mode: "0644"
+  when: docker_using_public_repo
+
+- name: Configure Satellite-hosted Docker CE repo
+  ansible.builtin.yum_repository:
+    name: docker-ce-satellite
+    description: "Docker CE (Satellite-managed content view)"
+    baseurl: "{{ docker_repo_baseurl }}"
+    gpgkey: "{{ docker_repo_gpgkey }}"
+    gpgcheck: true
+    enabled: true
+  when: not docker_using_public_repo
+
+- name: Install Docker packages
+  ansible.builtin.dnf:
+    name: "{{ docker_packages }}"
+    state: present

@@ -1,0 +1,68 @@
+# {{ ansible_managed | default('Managed by Ansible — server_roles/kubernetes_node') }}
+apiVersion: kubeadm.k8s.io/v1beta3
+kind: InitConfiguration
+localAPIEndpoint:
+  advertiseAddress: {{ ansible_default_ipv4.address }}
+  bindPort: {{ k8s_apiserver_bind_port }}
+nodeRegistration:
+  criSocket: {{ k8s_container_runtime_endpoint }}
+  kubeletExtraArgs:
+    node-ip: {{ ansible_default_ipv4.address }}
+---
+apiVersion: kubeadm.k8s.io/v1beta3
+kind: ClusterConfiguration
+kubernetesVersion: "{{ k8s_installed_version }}"
+controlPlaneEndpoint: "{{ k8s_control_plane_endpoint if k8s_control_plane_endpoint | length > 0 else ansible_default_ipv4.address ~ ':' ~ k8s_apiserver_bind_port }}"
+networking:
+  podSubnet: {{ k8s_pod_network_cidr }}
+  serviceSubnet: {{ k8s_service_cidr }}
+apiServer:
+  extraArgs:
+{% for key, value in k8s_apiserver_extra_args.items() %}
+    {{ key }}: "{{ value }}"
+{% endfor %}
+{% if k8s_encryption_at_rest_enabled %}
+    encryption-provider-config: "/etc/kubernetes/encryption-config.yaml"
+{% endif %}
+  extraVolumes:
+    - name: audit-policy
+      hostPath: /etc/kubernetes/audit-policy.yaml
+      mountPath: /etc/kubernetes/audit-policy.yaml
+      readOnly: true
+      pathType: File
+    - name: audit-logs
+      hostPath: /var/log/kubernetes/audit
+      mountPath: /var/log/kubernetes/audit
+      readOnly: false
+      pathType: DirectoryOrCreate
+{% if k8s_encryption_at_rest_enabled %}
+    - name: encryption-config
+      hostPath: /etc/kubernetes/encryption-config.yaml
+      mountPath: /etc/kubernetes/encryption-config.yaml
+      readOnly: true
+      pathType: File
+{% endif %}
+controllerManager:
+  extraArgs:
+{% for key, value in k8s_controller_manager_extra_args.items() %}
+    {{ key }}: "{{ value }}"
+{% endfor %}
+scheduler:
+  extraArgs:
+{% for key, value in k8s_scheduler_extra_args.items() %}
+    {{ key }}: "{{ value }}"
+{% endfor %}
+---
+apiVersion: kubelet.config.k8s.io/v1beta1
+kind: KubeletConfiguration
+protectKernelDefaults: {{ k8s_kubelet_protect_kernel_defaults | lower }}
+readOnlyPort: {{ k8s_kubelet_read_only_port }}
+eventRecordQPS: {{ k8s_kubelet_event_record_qps }}
+streamingConnectionIdleTimeout: "{{ k8s_kubelet_streaming_connection_idle_timeout }}"
+rotateCertificates: {{ k8s_kubelet_rotate_certificates | lower }}
+serverTLSBootstrap: {{ k8s_kubelet_server_tls_bootstrap | lower }}
+authentication:
+  anonymous:
+    enabled: false
+authorization:
+  mode: Webhook

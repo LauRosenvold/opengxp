@@ -1,0 +1,30 @@
+---
+# Only for postgresql_role: primary. Runs after tasks/config.yml has
+# already started the service — CREATE ROLE needs a running server.
+
+- name: Fail loudly if replication credentials are missing
+  ansible.builtin.assert:
+    that:
+      - postgresql_replication_password | length > 0
+    fail_msg: >-
+      postgresql_role is 'primary' on {{ inventory_hostname }} but
+      postgresql_replication_password is empty. Supply it via an
+      ansible-vault encrypted group_vars/host_vars file — do not put it
+      here in plaintext.
+
+- name: Check whether the replication role already exists
+  ansible.builtin.command: >
+    {{ postgresql_bin_dir }}/psql -tAc
+    "SELECT 1 FROM pg_roles WHERE rolname='{{ postgresql_replication_user }}'"
+  become_user: postgres
+  register: postgresql_replication_role_check
+  changed_when: false
+
+- name: Create the replication role
+  ansible.builtin.command: >
+    {{ postgresql_bin_dir }}/psql -c
+    "CREATE ROLE {{ postgresql_replication_user }} WITH REPLICATION LOGIN ENCRYPTED PASSWORD '{{ postgresql_replication_password }}'"
+  become_user: postgres
+  when: postgresql_replication_role_check.stdout | trim != '1'
+  changed_when: true
+  no_log: true   # command line contains the replication password

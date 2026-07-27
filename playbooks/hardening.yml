@@ -1,0 +1,46 @@
+---
+# Security hardening roles only. Safe to re-run on a schedule (e.g.
+# nightly in staging, weekly in production) to correct drift — every role
+# here is written to be idempotent.
+#
+# Order matters: cis_hardening (or its RHEL10/AlmaLinux10 fallback) runs
+# first and then ssh_hardening / auditd_gxp / user_access_gxp deliberately run
+# after it and win on any file both would otherwise touch — see
+# docs/BASELINE_MAPPING.md for why.
+
+- name: Apply security hardening baseline
+  # !hyperv_hosts: Windows, WinRM-connected, out of scope for this
+  # RHEL/AlmaLinux CIS baseline entirely. !localhost: the Ansible control
+  # node itself (see docs/PROVISIONING.md) — not a managed host.
+  hosts: all:!hyperv_hosts:!localhost
+  become: true
+  serial: "20%"
+  max_fail_percentage: 10
+
+  roles:
+    - role: cis_hardening
+      tags: [hardening, cis]
+    - role: selinux_enforce
+      tags: [hardening, selinux]
+    - role: firewalld_baseline
+      tags: [hardening, firewall]
+    - role: chrony_time
+      tags: [hardening, time]
+    - role: ssh_hardening
+      tags: [hardening, ssh]
+    - role: auditd_gxp
+      tags: [hardening, audit]
+    - role: aide_fim
+      tags: [hardening, fim]
+    - role: user_access_gxp
+      tags: [hardening, access]
+    - role: identity_sssd
+      tags: [hardening, identity]
+    - role: logging_forward
+      tags: [hardening, logging]
+    - role: fips_mode
+      tags: [hardening, fips, never]
+      # `never` tag: fips_mode is a disruptive, reboot-requiring
+      # transition guarded by `allow_fips_transition` — keep it out of a
+      # bare `ansible-playbook hardening.yml` run. Invoke explicitly with
+      # `--tags fips -e allow_fips_transition=true` when you actually mean it.

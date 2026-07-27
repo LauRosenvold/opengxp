@@ -1,0 +1,73 @@
+---
+- name: Ensure the TLS directory exists
+  ansible.builtin.file:
+    path: /etc/pgsql/tls
+    state: directory
+    owner: postgres
+    group: postgres
+    mode: "0750"
+  when: postgresql_ssl_enabled | bool
+
+- name: Deploy a real TLS certificate and key, if supplied
+  ansible.builtin.copy:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    owner: postgres
+    group: postgres
+    mode: "{{ item.mode }}"
+  loop:
+    - { src: "{{ postgresql_ssl_cert_src }}", dest: /etc/pgsql/tls/server.crt, mode: "0644" }
+    - { src: "{{ postgresql_ssl_key_src }}", dest: /etc/pgsql/tls/server.key, mode: "0600" }
+  loop_control:
+    label: "{{ item.dest }}"
+  when:
+    - postgresql_ssl_enabled | bool
+    - postgresql_ssl_cert_src | length > 0
+    - postgresql_ssl_key_src | length > 0
+  notify: Restart postgresql
+
+- name: Check whether a self-signed certificate already exists
+  ansible.builtin.stat:
+    path: /etc/pgsql/tls/server.crt
+  register: postgresql_selfsigned_cert_stat
+  when:
+    - postgresql_ssl_enabled | bool
+    - postgresql_ssl_cert_src | length == 0
+
+- name: Warn that a self-signed certificate is being generated
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: postgresql_ssl_cert_src/key_src are empty on
+      {{ inventory_hostname }} — generating a self-signed certificate.
+      Fine for lab/staging, NOT approved for a real GxP production
+      database. Point those vars at a real CA-issued cert/key once you
+      have one — see docs/SERVER_ROLES.md.
+  when:
+    - postgresql_ssl_enabled | bool
+    - postgresql_ssl_cert_src | length == 0
+    - not postgresql_selfsigned_cert_stat.stat.exists
+
+- name: Generate a self-signed certificate and key
+  ansible.builtin.command: >
+    openssl req -new -x509 -days {{ postgresql_ssl_self_signed_days }}
+    -nodes -text
+    -out /etc/pgsql/tls/server.crt
+    -keyout /etc/pgsql/tls/server.key
+    -subj "/CN={{ ansible_fqdn | default(inventory_hostname) }}"
+  when:
+    - postgresql_ssl_enabled | bool
+    - postgresql_ssl_cert_src | length == 0
+    - not postgresql_selfsigned_cert_stat.stat.exists
+  changed_when: true
+  notify: Restart postgresql
+
+- name: Ensure correct ownership/permissions on the certificate and key
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    owner: postgres
+    group: postgres
+    mode: "{{ item.mode }}"
+  loop:
+    - { path: /etc/pgsql/tls/server.crt, mode: "0644" }
+    - { path: /etc/pgsql/tls/server.key, mode: "0600" }
+  when: postgresql_ssl_enabled | bool

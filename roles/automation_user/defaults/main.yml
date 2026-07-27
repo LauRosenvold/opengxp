@@ -1,0 +1,46 @@
+---
+# The account every playbook in this repo connects and becomes-from. No
+# playbook ever runs with `ansible_user: root` — root is only ever a
+# `become` *target*, reached via sudo from this dedicated account, on
+# hosts where roles/user_access_gxp's sudo I/O logging captures every
+# privileged action it takes. See docs/BASELINE_MAPPING.md for why this
+# account's broad sudo access is a deliberate, different trade-off from
+# the segregation-of-duties groups in roles/user_access_gxp.
+automation_user_name: svc_ansible
+automation_user_group: svc_ansible
+automation_user_comment: "Ansible automation service account — not for interactive/human use"
+automation_user_shell: /bin/bash
+automation_user_home: "/home/{{ automation_user_name }}"
+
+# System account (UID below UID_MIN): keeps it out of
+# roles/el10_baseline_hardening's interactive-user password-aging sweep
+# and out of any "list of human users" reasoning elsewhere — it has no
+# password to age in the first place (see password_lock below).
+automation_user_system: true
+
+# Key-based auth only — no default here, deliberately. An empty list fails
+# the role's assert rather than silently creating an account nothing can
+# reach (which would either brick automation or, worse, get "fixed" later
+# by someone enabling password auth for it).
+automation_user_ssh_public_keys: []
+# Example (public keys are not secret — fine to commit):
+#   - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI... ci-runner-prod-01"
+
+# `exclusive: true` on the authorized_keys deployment (see tasks/main.yml)
+# means whatever is NOT in automation_user_ssh_public_keys gets removed —
+# that's intentional key-rotation behavior, not a bug. Rotate by adding
+# the new key here first, confirming a run succeeds using it, THEN
+# removing the old key in a follow-up change — never both in one step,
+# or a mistake locks every playbook out at once.
+automation_user_authorized_keys_exclusive: true
+
+# NOPASSWD is a deliberate, documented exception to "always require a
+# sudo password" — this account authenticates by SSH key only (no
+# interactive login is even possible, see password_lock), runs
+# unattended from a CI runner/bastion with no human present to type a
+# become password, and every command it runs is captured by
+# roles/user_access_gxp's sudo logfile + I/O log regardless. Flip to
+# false only if you've wired become_password through some other secure,
+# unattended mechanism (e.g. a vaulted become password plus
+# --vault-password-file on the CI runner).
+automation_user_sudo_nopasswd: true

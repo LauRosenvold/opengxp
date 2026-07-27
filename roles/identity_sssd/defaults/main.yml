@@ -1,0 +1,69 @@
+---
+# identity_backend_enabled / identity_domain / identity_backend come from
+# inventories/<env>/group_vars/all.yml, disabled by default until a real
+# AD/IdM domain is named (see README.md "Integrations" assumption). See
+# docs/IDENTITY.md for the fuller picture — ID mapping choice, qualified
+# names, AD-group sudo mapping (that part lives in roles/user_access_gxp),
+# GPO access control, GSSAPI SSH.
+identity_backend_enabled: false
+identity_domain: ""
+identity_backend: ad     # "ad" or "ipa"
+
+# Join credentials must be supplied via an ansible-vault-encrypted
+# group_vars/all.vault.yml — no default, so an enabled-but-uncredentialed
+# run fails loudly instead of silently skipping the join.
+identity_join_username: ""
+identity_join_password: ""
+
+# Only members of these groups may log in interactively (sssd
+# access_provider=simple). Empty list + access_provider=simple means
+# nobody from the domain can log in until this is populated — fail
+# closed, not open.
+identity_allowed_groups: []
+# Example: ["gxp-linux-admins@corp.example.internal"]
+
+identity_cache_credentials: true          # allow offline login if the DC/IdM server is briefly unreachable
+identity_offline_credentials_expiration_days: 3
+
+# --- ID mapping (AD only) -----------------------------------------------------
+# true (default): SSSD generates POSIX UIDs/GIDs itself from each
+# object's SID (a stable hash — the same AD user gets the same UID on
+# every SSSD-joined host without any AD-side schema work). This is the
+# right default for an estate that hasn't extended its AD schema with
+# POSIX attributes (uidNumber/gidNumber) — the common case.
+# false: use POSIX attributes already present in AD (RFC2307/"Identity
+# Management for Unix" schema extension) — only correct if your AD team
+# has actually populated those attributes; if they haven't, users get no
+# usable UID at all and login fails.
+identity_ad_id_mapping_enabled: true
+
+# --- Qualified names -----------------------------------------------------------
+# false (default): users/groups resolve as their plain short name
+# ("jdoe", "gxp-linux-admins") rather than "jdoe@corp.example.internal".
+# Simpler everywhere this matters — sudoers group references (see
+# roles/user_access_gxp), log lines, `id`/`getent` output — but only
+# correct for a single-domain setup. Flip to true (and expect to write
+# "group@domain" in every place a group name is referenced) if this
+# estate joins multiple domains/forests where short names could collide.
+identity_use_fully_qualified_names: false
+
+# --- GPO-based access control (AD only) -----------------------------------------
+# SSSD can partially honor Windows GPOs — specifically the "Allow/Deny
+# log on locally" and "Allow/Deny log on through Remote Desktop Services"
+# rights — via ad_gpo_access_control. "permissive" (SSSD's own default)
+# evaluates GPOs and logs what it would have done without enforcing;
+# "enforcing" actually denies logon per GPO; "disabled" skips GPO
+# evaluation entirely and relies purely on
+# identity_allowed_groups/simple_allow_groups above. Most estates
+# managing Linux access via AD *groups* (this role's primary mechanism)
+# want "disabled" or "permissive" — "enforcing" only makes sense if your
+# AD team already manages GPOs specifically scoped to these Linux hosts,
+# which is unusual. See docs/IDENTITY.md.
+identity_ad_gpo_access_control: permissive
+
+# --- Shell / home directory -----------------------------------------------------
+identity_default_shell: /bin/bash
+# %u = username, %d = domain — only relevant in practice if
+# identity_use_fully_qualified_names is true, since %d would otherwise
+# be redundant.
+identity_fallback_homedir: "/home/%u"

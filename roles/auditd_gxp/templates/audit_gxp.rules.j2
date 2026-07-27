@@ -1,0 +1,82 @@
+# {{ ansible_managed | default('Managed by Ansible — roles/auditd_gxp') }}
+## Audit rule set mapped to GxP / 21 CFR Part 11 relevant event
+## categories, layered on top of (not a replacement for) generic CIS
+## audit guidance. See docs/BASELINE_MAPPING.md and docs/VALIDATION.md
+## for how this maps to validation evidence.
+##
+## Rule ordering matters to the kernel audit subsystem: keep deletions
+## (-D) first, buffer sizing next, then watches, then the immutable flag
+## dead last — nothing after `-e 2` is loaded until the next reboot.
+
+## First rule: delete all existing rules so re-runs are idempotent
+-D
+
+## Increase kernel audit buffer — GxP hosts generate more audit volume
+## than a generic server due to the wider watch set below.
+-b 8192
+-f 1
+
+## --- Identity: changes to user/group/password databases (Part 11 "who") ----
+-w /etc/passwd -p wa -k gxp-identity
+-w /etc/shadow -p wa -k gxp-identity
+-w /etc/group -p wa -k gxp-identity
+-w /etc/gshadow -p wa -k gxp-identity
+-w /etc/security/opasswd -p wa -k gxp-identity
+-w /etc/sudoers -p wa -k gxp-privilege-escalation
+-w /etc/sudoers.d/ -p wa -k gxp-privilege-escalation
+
+## --- Session: logins, logouts, failed attempts (Part 11 "who", "when") -----
+-w /var/log/lastlog -p wa -k gxp-logins
+-w /var/log/faillock/ -p wa -k gxp-logins
+-w /var/run/faillock/ -p wa -k gxp-logins
+-w /var/log/wtmp -p wa -k gxp-session
+-w /var/log/btmp -p wa -k gxp-session
+
+## --- Privileged command execution (who ran what as an elevated user) -------
+-a always,exit -F arch=b64 -F euid=0 -F auid>={{ auditd_uid_min }} -F auid!=unset -S execve -k gxp-privileged-commands
+-a always,exit -F arch=b32 -F euid=0 -F auid>={{ auditd_uid_min }} -F auid!=unset -S execve -k gxp-privileged-commands
+
+## --- Time: clock changes threaten record timestamp integrity ---------------
+-a always,exit -F arch=b64 -S adjtimex,settimeofday,clock_settime -k gxp-time-change
+-a always,exit -F arch=b32 -S adjtimex,settimeofday,clock_settime -k gxp-time-change
+-w /etc/localtime -p wa -k gxp-time-change
+
+## --- Network / hostname config (affects log source identity) ---------------
+-w /etc/hosts -p wa -k gxp-system-locale
+-w /etc/sysconfig/network -p wa -k gxp-system-locale
+-w /etc/issue -p wa -k gxp-system-locale
+-w /etc/issue.net -p wa -k gxp-system-locale
+
+## --- Mandatory access control (SELinux) config tampering -------------------
+-w /etc/selinux/ -p wa -k gxp-mac-policy
+
+## --- Kernel module load/unload (could disable auditing subsystems) ---------
+-a always,exit -F arch=b64 -S init_module,delete_module -k gxp-kernel-modules
+-a always,exit -F arch=b32 -S init_module,delete_module -k gxp-kernel-modules
+
+## --- Audit configuration itself: who's tampering with the audit trail ------
+-w /etc/audit/ -p wa -k gxp-audit-config
+-w /etc/audisp/ -p wa -k gxp-audit-config
+-w /etc/libaudit.conf -p wa -k gxp-audit-config
+-w /sbin/auditctl -p x -k gxp-audit-tools
+-w /sbin/auditd -p x -k gxp-audit-tools
+-w /usr/sbin/augenrules -p x -k gxp-audit-tools
+
+## --- SSH configuration changes (matches roles/ssh_hardening's file) --------
+-w /etc/ssh/sshd_config -p wa -k gxp-ssh-config
+
+{% if auditd_gxp_extra_watches_enabled %}
+## --- Extra critical-tier watches (gxp_tier: critical only) -----------------
+-a always,exit -F arch=b64 -S execve -C uid!=euid -F euid=0 -k gxp-setuid-critical
+-a always,exit -F arch=b32 -S execve -C uid!=euid -F euid=0 -k gxp-setuid-critical
+{% endif %}
+
+## --- GxP electronic-record paths (populate auditd_gxp_watched_paths) -------
+{% for item in auditd_gxp_watched_paths %}
+-w {{ item.path }} -p wa -k {{ item.key }}
+{% endfor %}
+
+## --- Make the configuration immutable: further changes require a reboot ---
+{% if auditd_immutable %}
+-e 2
+{% endif %}

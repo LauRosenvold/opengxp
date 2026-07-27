@@ -1,0 +1,49 @@
+---
+- name: Render docker-compose.yml
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ netbox_app_dir }}/docker-compose.yml"
+    owner: root
+    group: root
+    mode: "0640"
+
+- name: Render the environment file (secrets — 0600, this file holds every credential in the stack)
+  ansible.builtin.template:
+    src: env.j2
+    dest: "{{ netbox_app_dir }}/.env"
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: Render the nginx reverse-proxy config
+  ansible.builtin.template:
+    src: nginx.conf.j2
+    dest: "{{ netbox_app_dir }}/nginx.conf"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart nginx container
+  # docker compose's `up -d` (below) auto-recreates a service when the
+  # compose file's SERVICE DEFINITION changes, but nginx.conf and the TLS
+  # cert/key are bind-mounted file *content* — compose has no visibility
+  # into that, so a plain config edit needs this explicit restart.
+
+- name: Pull images and (re)create the stack to match the rendered config
+  ansible.builtin.command: >
+    docker compose -f {{ netbox_app_dir }}/docker-compose.yml
+    --env-file {{ netbox_app_dir }}/.env
+    up -d --remove-orphans
+    {{ '--scale netbox-worker=' ~ (netbox_worker_replicas | string) if netbox_worker_replicas | int > 1 else '' }}
+  args:
+    chdir: "{{ netbox_app_dir }}"
+  register: netbox_compose_up
+  # docker compose's own progress output goes to stderr, and its exact
+  # wording isn't a stable API to parse — this changed_when is a
+  # best-effort heuristic, same trade-off as several other
+  # hard-to-introspect commands elsewhere in this repo (e.g.
+  # roles/patch_management's chage loop). `up -d` is idempotent in
+  # effect regardless of whether Ansible reports it as "changed".
+  changed_when: >-
+    'Started' in (netbox_compose_up.stdout ~ netbox_compose_up.stderr)
+    or 'Created' in (netbox_compose_up.stdout ~ netbox_compose_up.stderr)
+    or 'Recreated' in (netbox_compose_up.stdout ~ netbox_compose_up.stderr)

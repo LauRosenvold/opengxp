@@ -1,0 +1,62 @@
+---
+# Pattern to replicate for every other role in roles/ — see
+# docs/VALIDATION.md, "Operational Qualification" for why molecule
+# results count as OQ evidence for a role.
+#
+# Uses Rocky Linux images as a stand-in for RHEL 9/10 in Docker — actual
+# RHEL container images require an active subscription/entitlement to
+# pull, which most CI runners don't carry. Rocky is upstream-compatible
+# enough for config/package-manager-level role testing; it is NOT a
+# substitute for testing against the real RHEL9/10 kernel+userspace in
+# playbooks/hardening.yml --check --diff against inventories/staging
+# before anything is considered validated.
+#
+# If you're standing up a molecule scenario specifically for
+# roles/el10_baseline_hardening, prefer `almalinux:10` images directly —
+# for that one role AlmaLinux isn't a stand-in, it's an actual supported
+# target OS (see inventories/*/group_vars/almalinux10.yml), and Docker
+# Hub doesn't have the same entitlement restriction Red Hat's registry does.
+dependency:
+  name: galaxy
+  options:
+    requirements-file: requirements.yml
+driver:
+  name: docker
+platforms:
+  - name: rhel9-standin
+    image: "rockylinux/rockylinux:9"
+    command: /sbin/init
+    privileged: true
+    cgroupns_mode: host
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+  - name: rhel10-standin
+    image: "rockylinux/rockylinux:10"
+    command: /sbin/init
+    privileged: true
+    cgroupns_mode: host
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+provisioner:
+  name: ansible
+  playbooks:
+    converge: converge.yml
+    verify: verify.yml
+  inventory:
+    group_vars:
+      all:
+        ssh_port: 22
+        gxp_tier: standard
+        ssh_client_alive_interval: 900
+        ssh_client_alive_count_max: 3
+verifier:
+  name: ansible
+scenario:
+  test_sequence:
+    - dependency
+    - create
+    - prepare
+    - converge
+    - idempotence
+    - verify
+    - destroy

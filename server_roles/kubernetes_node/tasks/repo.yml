@@ -1,0 +1,71 @@
+---
+# Kubernetes package repo + kubelet/kubeadm/kubectl only — CRI-agnostic.
+# Container-runtime-specific repo/package setup (containerd or CRI-O)
+# lives in tasks/containerd.yml / tasks/crio.yml respectively, dispatched
+# from tasks/main.yml based on k8s_container_runtime.
+
+- name: Determine whether we're falling back to the public Kubernetes repo
+  ansible.builtin.set_fact:
+    k8s_using_public_repo: "{{ k8s_repo_baseurl == 'CHANGEME' }}"
+
+- name: Warn when bypassing Satellite for Kubernetes content
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: {{ inventory_hostname }} is using pkgs.k8s.io directly
+      instead of a Satellite-managed content view for Kubernetes
+      v{{ k8s_version }}. Fine for lab/evaluation; on a real estate this
+      should be synced into Satellite like everything else
+      roles/patch_management patches — see docs/SERVER_ROLES.md.
+  when: k8s_using_public_repo
+
+- name: Configure Satellite-hosted Kubernetes repo
+  ansible.builtin.yum_repository:
+    name: "kubernetes-v{{ k8s_version }}-satellite"
+    description: "Kubernetes v{{ k8s_version }} (Satellite-managed content view)"
+    baseurl: "{{ k8s_repo_baseurl }}"
+    gpgkey: "{{ k8s_repo_gpgkey }}"
+    gpgcheck: true
+    enabled: true
+  when: not k8s_using_public_repo
+
+- name: Configure public Kubernetes repo (fallback only)
+  ansible.builtin.yum_repository:
+    name: "kubernetes-v{{ k8s_version }}"
+    description: "Kubernetes v{{ k8s_version }} (pkgs.k8s.io)"
+    baseurl: "{{ k8s_public_repo_baseurl }}"
+    gpgkey: "{{ k8s_public_repo_gpgkey }}"
+    gpgcheck: true
+    enabled: true
+  when: k8s_using_public_repo
+
+- name: Install the dnf versionlock plugin
+  ansible.builtin.dnf:
+    name: python3-dnf-plugin-versionlock
+    state: present
+  when: k8s_versionlock_enabled | bool
+
+- name: Install kubelet/kubeadm/kubectl (version-pinned within the selected minor repo)
+  ansible.builtin.dnf:
+    name:
+      - "kubelet{{ '-' + k8s_package_version if k8s_package_version | length > 0 else '' }}"
+      - "kubeadm{{ '-' + k8s_package_version if k8s_package_version | length > 0 else '' }}"
+      - "kubectl{{ '-' + k8s_package_version if k8s_package_version | length > 0 else '' }}"
+    state: present
+    # dnf install pkg-<version> vs the "latest" default when
+    # k8s_package_version is empty — allow_downgrade covers the
+    # k8s_package_version case where the installed version is newer than
+    # the one now pinned (e.g. rolling back within the same minor after a
+    # bad patch release).
+    allow_downgrade: true
+
+- name: Lock kubelet/kubeadm/kubectl to their currently installed versions
+  ansible.builtin.command: dnf versionlock add kubelet kubeadm kubectl
+  register: k8s_versionlock_result
+  changed_when: "'Adding versionlock' in k8s_versionlock_result.stdout"
+  when: k8s_versionlock_enabled | bool
+
+- name: Ensure kubelet is enabled (kubeadm starts it once it has a config to consume)
+  ansible.builtin.systemd:
+    name: kubelet
+    enabled: true
+    daemon_reload: true

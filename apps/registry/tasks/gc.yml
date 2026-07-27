@@ -1,0 +1,27 @@
+---
+- name: Deploy the garbage-collection wrapper script
+  ansible.builtin.template:
+    src: registry_gc.sh.j2
+    dest: /usr/local/sbin/registry-gc.sh
+    owner: root
+    group: root
+    mode: "0750"
+  when: registry_delete_enabled | bool
+
+- name: Schedule periodic garbage collection
+  ansible.builtin.template:
+    src: registry_gc_cron.j2
+    dest: /etc/cron.d/registry-gc
+    owner: root
+    group: root
+    mode: "0644"
+  when: registry_delete_enabled | bool
+
+- name: Remove garbage-collection artifacts if deletion is disabled
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /usr/local/sbin/registry-gc.sh
+    - /etc/cron.d/registry-gc
+  when: not (registry_delete_enabled | bool)

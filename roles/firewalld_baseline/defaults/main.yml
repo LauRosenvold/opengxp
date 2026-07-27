@@ -1,0 +1,24 @@
+---
+# Default-deny posture: the "drop" zone rejects everything not explicitly
+# opened. Every port/service below must be justified by an actual running
+# service on the host — an open port with nothing listening is still an
+# audit finding waiting to happen.
+firewalld_default_zone: drop
+
+# SSH is always allowed, sourced from ssh_hardening's port so the two
+# roles can't drift out of sync with each other.
+firewalld_ssh_port: "{{ ssh_port | default(22) }}"
+
+# Applies to every host in the fleet regardless of function — keep this
+# list minimal. Node/monitoring agents, Satellite/katello-agent callback,
+# etc. belong here if truly fleet-wide; anything function-specific belongs
+# in the functional group's group_vars (webservers/appservers/dbservers)
+# as `firewalld_rules` instead.
+firewalld_base_rules: []
+# Example: - { service: cockpit }
+
+# Set per functional group (inventories/<env>/group_vars/webservers.yml
+# etc.) — each entry is either {service: "https"} or {port: "8443/tcp"}.
+firewalld_rules: []
+
+firewalld_log_denied: "unicast"   # log denied unicast packets — audit-relevant, cheap on a "drop" zone

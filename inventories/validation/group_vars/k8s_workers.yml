@@ -1,0 +1,13 @@
+---
+# CANONICAL COPY LIVES IN inventories/production/group_vars/k8s_workers.yml
+# See the note in validation/group_vars/rhel9.yml — same rule applies here.
+#
+# Same zone-wide-open caveat as group_vars/k8s_control_plane.yml.
+firewalld_rules:
+  - { port: "10250/tcp" }        # kubelet API
+  - { port: "30000-32767/tcp" }  # NodePort service range — only needed if workloads actually use NodePort
+  # --- CNI/add-on ports, only relevant depending on choices in
+  # group_vars/k8s_nodes.yml — remove whichever don't apply to you:
+  - { port: "8472/udp" }        # Flannel VXLAN backend (k8s_cni_provider: flannel) — remove if using Calico
+  - { port: "7946/tcp" }        # MetalLB memberlist (k8s_metallb_enabled: true) — remove if MetalLB is off
+  - { port: "7946/udp" }        # MetalLB memberlist

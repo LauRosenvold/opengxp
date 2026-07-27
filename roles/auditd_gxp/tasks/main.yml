@@ -1,0 +1,59 @@
+---
+- name: Ensure audit package is installed
+  ansible.builtin.dnf:
+    name:
+      - audit
+      - audit-libs
+    state: present
+
+- name: Configure auditd.conf core settings
+  ansible.builtin.lineinfile:
+    path: /etc/audit/auditd.conf
+    regexp: "^#?\\s*{{ item.key }}\\s*="
+    line: "{{ item.key }} = {{ item.value }}"
+  loop:
+    - { key: max_log_file, value: "{{ auditd_max_log_file_mb }}" }
+    - { key: num_logs, value: "{{ auditd_num_logs }}" }
+    - { key: max_log_file_action, value: "{{ auditd_max_log_file_action }}" }
+    - { key: space_left_action, value: "{{ auditd_space_left_action }}" }
+    - { key: admin_space_left_action, value: "{{ auditd_admin_space_left_action }}" }
+    - { key: local_events, value: "yes" }
+    - { key: log_format, value: "ENRICHED" }
+  loop_control:
+    label: "{{ item.key }}"
+  notify: Load audit rules
+
+- name: Deploy GxP audit rules
+  ansible.builtin.template:
+    src: audit_gxp.rules.j2
+    dest: /etc/audit/rules.d/gxp.rules
+    owner: root
+    group: root
+    mode: "0640"
+  notify: Load audit rules
+
+- name: Ensure auditd is enabled and running
+  ansible.builtin.systemd:
+    name: auditd
+    state: started
+    enabled: true
+
+- name: Flush handlers now so rules are loaded before we check immutability state
+  ansible.builtin.meta: flush_handlers
+
+- name: Check current audit rule enforcement mode
+  ansible.builtin.command: auditctl -s
+  register: auditd_status
+  changed_when: false
+
+- name: Warn if immutable mode is desired but not yet active (requires reboot to take effect)
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: auditd_immutable is true but {{ inventory_hostname }}'s
+      running audit configuration is not yet in immutable mode
+      ({{ auditd_status.stdout }}). The rules file already has `-e 2`
+      queued — it takes effect on the next reboot. Track this as an open
+      item until the host's next scheduled maintenance reboot.
+  when:
+    - auditd_immutable | bool
+    - "'enabled 2' not in auditd_status.stdout"

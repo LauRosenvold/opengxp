@@ -1,0 +1,5 @@
+---
+# fips_mode_enabled comes from gxp_tier group_vars, off by default. Toggling
+# this always requires a reboot and an initramfs rebuild — never done
+# automatically inline. See tasks/main.yml.
+fips_mode_enabled: false

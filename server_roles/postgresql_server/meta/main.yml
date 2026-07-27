@@ -1,0 +1,17 @@
+---
+galaxy_info:
+  role_name: postgresql_server
+  description: >-
+    PostgreSQL database server on PGDG packages (version-selectable),
+    hardened postgresql.conf/pg_hba.conf, pgAudit for GxP SQL-level audit
+    trail, TLS (self-signed default, real cert pluggable), basic
+    primary/replica streaming replication, and WAL archiving as a
+    documented backup-mechanism-not-a-solution. Runs against the
+    `dbservers` inventory group. Lives in server_roles/, not roles/ — see
+    docs/SERVER_ROLES.md.
+  license: Apache-2.0
+  min_ansible_version: "2.15"
+  platforms:
+    - name: EL
+      versions: ["9", "10"]
+dependencies: []

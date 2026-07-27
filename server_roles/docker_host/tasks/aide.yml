@@ -1,0 +1,20 @@
+---
+- name: Add Docker-specific AIDE watch/exclusion rules
+  ansible.builtin.blockinfile:
+    path: /etc/aide.conf
+    marker: "# {mark} ANSIBLE MANAGED BLOCK — server_roles/docker_host AIDE rules"
+    block: |
+      /etc/docker R
+      !/var/lib/docker
+      !/var/lib/containerd
+  register: docker_aide_conf_changed
+
+- name: Warn that an AIDE re-init may be needed
+  ansible.builtin.debug:
+    msg: >-
+      aide.conf's watch list changed on {{ inventory_hostname }} to add
+      /etc/docker (and exclude /var/lib/docker + /var/lib/containerd).
+      Same rule as roles/aide_fim: if a baseline database already exists,
+      this is NOT covered until `aide --init` is re-run and the database
+      promoted, as a deliberate, change-controlled action.
+  when: docker_aide_conf_changed.changed

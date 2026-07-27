@@ -1,0 +1,38 @@
+---
+# auditd_max_log_file_mb / auditd_num_logs / auditd_space_left_action /
+# auditd_admin_space_left_action / auditd_gxp_extra_watches_enabled are
+# expected to come from gxp_tier group_vars (gxp_critical.yml vs
+# gxp_standard.yml), which set them as plain global vars of the same name.
+# Group_vars already outrank role defaults in Ansible's precedence order,
+# so these lines are purely the safety-net fallback for a host that
+# somehow isn't in either tier group — they are NOT self-referential
+# (that would be a recursive-template error), just the same names with
+# plain literal values.
+auditd_max_log_file_mb: 50
+auditd_num_logs: 10
+auditd_space_left_action: email
+auditd_admin_space_left_action: suspend
+auditd_max_log_file_action: keep_logs   # never auto-rotate away audit evidence
+auditd_gxp_extra_watches_enabled: false
+
+# Make the running audit configuration immutable (-e 2): rules can then
+# only be changed by editing rules.d and rebooting, and auditd itself
+# cannot be stopped without a reboot. This is both a CIS/STIG control and
+# a GxP expectation (nobody can quietly turn off the audit trail without
+# it being visible as a scheduled, change-controlled reboot). Default on
+# for the whole fleet — override per-host only with a documented
+# exception.
+auditd_immutable: true
+
+# GxP electronic-record paths to watch for read/write access beyond the
+# generic identity/privilege/audit-config watches below. Populate with
+# real paths per application once known — e.g. LIMS data directories, MES
+# recipe/batch record storage, e-signature key material.
+auditd_gxp_watched_paths: []
+# Example:
+#   - { path: /opt/lims/data, key: gxp-lims-records }
+#   - { path: /opt/mes/batch-records, key: gxp-mes-records }
+
+# UID below which audit rules that key on `auid` should be ignored (system
+# accounts, not interactive users) — standard CIS/STIG convention.
+auditd_uid_min: 1000

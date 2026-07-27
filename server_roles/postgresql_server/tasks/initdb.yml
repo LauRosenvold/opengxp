@@ -1,0 +1,14 @@
+---
+# Only for standalone/primary nodes — a replica's data directory comes
+# from pg_basebackup against the primary instead (see
+# tasks/replica_basebackup.yml), never from initdb.
+
+- name: Check whether the data directory is already initialized
+  ansible.builtin.stat:
+    path: "{{ postgresql_data_dir }}/PG_VERSION"
+  register: postgresql_pgversion_stat
+
+- name: Initialize the PostgreSQL data directory
+  ansible.builtin.command: "{{ postgresql_bin_dir }}/postgresql-{{ postgresql_version }}-setup initdb"
+  when: not postgresql_pgversion_stat.stat.exists
+  changed_when: true

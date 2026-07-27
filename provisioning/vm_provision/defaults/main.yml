@@ -1,0 +1,81 @@
+---
+# Creates (or removes) a VM from a template on a hypervisor cluster —
+# vCenter (community.vmware.vmware_guest) or Hyper-V (ansible.windows
+# PowerShell against the Hyper-V host via WinRM, cloning via
+# `Import-VM -Copy -GenerateNewId` from an exported template VM). See
+# docs/PROVISIONING.md for why this is its own top-level tier
+# (provisioning/, not roles/server_roles/apps) — it runs against a
+# hypervisor management API, not a managed Linux host, and the host it
+# creates doesn't exist for Ansible to configure at all until this
+# finishes.
+
+provisioning_hypervisor: vcenter   # vcenter | hyperv
+
+# --- Common VM spec (both hypervisors) -----------------------------------------
+vm_name: "CHANGEME"                 # becomes the hypervisor-side VM name — NOT automatically the eventual OS hostname, see docs/PROVISIONING.md
+vm_state: present                   # present (create/ensure running) | absent (decommission — see docs/PROVISIONING.md before using this)
+vm_cpu_count: 2
+vm_memory_mb: 4096
+vm_extra_disk_gb: 0                 # 0 = template's own disk size only; >0 adds one additional data disk
+
+# ================================================================================
+# vCenter
+# ================================================================================
+vcenter_hostname: "CHANGEME"         # e.g. vcenter.gxp.example.internal
+vcenter_username: "CHANGEME"
+vcenter_password: ""                 # vaulted, no default
+vcenter_validate_certs: true          # only set false against a known lab/self-signed vCenter, never production
+
+vcenter_datacenter: "CHANGEME"
+vcenter_cluster: "CHANGEME"
+vcenter_resource_pool: ""             # empty = cluster's default resource pool
+vcenter_folder: "/{{ vcenter_datacenter }}/vm"
+vcenter_datastore: "CHANGEME"
+vcenter_template_name: "CHANGEME"     # exact vCenter template name to clone from
+vcenter_network_portgroup: "CHANGEME"
+
+# Guest customization for Linux templates (via open-vm-tools) — leave
+# vcenter_network_type as dhcp (the default) to skip static networking
+# entirely and let the template's own defaults apply. Requires
+# open-vm-tools running and the customization spec engine working in the
+# template — most current RHEL/AlmaLinux cloud/template images have this
+# out of the box, but verify against your own template.
+vcenter_customization_hostname: "{{ vm_name }}"
+vcenter_customization_domain: ""      # e.g. gxp.example.internal — empty is valid (no domain set)
+vcenter_dns_servers: []
+vcenter_network_type: dhcp             # dhcp | static
+vcenter_network_ip: ""                 # required if vcenter_network_type is static
+vcenter_network_netmask: ""
+vcenter_network_gateway: ""
+
+vcenter_wait_for_ip_address: true      # requires VMware Tools/open-vm-tools running in the template
+vcenter_wait_for_ip_timeout: 600
+
+# ================================================================================
+# Hyper-V
+# ================================================================================
+# The play targeting Hyper-V connects to an inventory host in the
+# `hyperv_hosts` group (ansible_connection: winrm — see
+# inventories/<env>/group_vars/hyperv_hosts.yml) — these vars describe
+# what to build once connected, not how to connect.
+hyperv_generation: 2
+hyperv_template_export_path: "CHANGEME"    # e.g. D:\HyperV\Templates\rhel9-golden — an Export-VM output directory
+hyperv_vm_path: "D:\\HyperV\\VMs"
+hyperv_vhd_path: "D:\\HyperV\\VHDs"
+hyperv_switch_name: "CHANGEME"              # the vswitch to connect the new VM's network adapter to
+hyperv_static_mac_address: ""               # empty = Hyper-V assigns a dynamic MAC; set one to support a DHCP reservation
+
+# No native Linux guest customization exists on Hyper-V the way VMware
+# Tools provides it for vCenter (see docs/PROVISIONING.md) — the new VM
+# boots with whatever the template itself defaults to (commonly DHCP,
+# plus cloud-init if the template has it installed and configured that
+# way already). Real hostname/network configuration for a
+# Hyper-V-provisioned VM happens on its first real Ansible run
+# (playbooks/provision_automation_user.yml onward), not here.
+
+# --- Output ------------------------------------------------------------------
+# Where a reviewable inventory snippet gets written after a successful
+# create — NOT the checked-in inventory itself. Folding a new host into
+# inventories/<env>/hosts.yml is a deliberate, reviewed, separate change
+# (see docs/CHANGE_CONTROL.md), not something this role does for you.
+provisioning_output_dir: "{{ playbook_dir }}/../artifacts/provisioning"

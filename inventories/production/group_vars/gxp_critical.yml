@@ -1,0 +1,36 @@
+---
+# Systems that are themselves a source of GxP electronic records (MES,
+# LIMS, historian, e-signature app tiers, and their DB backends). Stricter
+# than gxp_standard across the board — err toward the stricter control
+# whenever a benchmark offers a range.
+
+gxp_tier: critical
+
+# --- Session / access ---------------------------------------------------------
+ssh_client_alive_interval: 300     # 5 min idle probe
+ssh_client_alive_count_max: 0      # disconnect on first missed probe
+tmout_shell_seconds: 600           # 10 min shell auto-logout (bash TMOUT)
+account_password_max_days: 60
+account_inactive_lock_days: 15
+
+# --- Audit ----------------------------------------------------------------
+# Superset of the standard-tier audit rule set — see
+# roles/auditd_gxp/templates/audit_gxp.rules.j2, gxp_tier_extra_watches.
+auditd_gxp_extra_watches_enabled: true
+auditd_max_log_file_mb: 100
+auditd_num_logs: 20
+auditd_space_left_action: "email"
+auditd_admin_space_left_action: "halt"   # halt rather than lose audit trail
+
+# --- File integrity ---------------------------------------------------------
+aide_check_schedule_cron: "0 */4 * * *"   # every 4h, vs daily on standard tier
+
+# --- Patch window -------------------------------------------------------------
+# Critical-tier hosts only patch inside an explicit, ticketed maintenance
+# window — never on the general fleet cadence.
+patch_requires_change_ticket: true
+patch_window_cron: ""   # intentionally empty: triggered per-change, not on a timer
+
+# --- FIPS ---------------------------------------------------------------------
+fips_mode_enabled: false   # set true if your validation package mandates it;
+                           # requires a reboot and a re-run of compliance_scan.yml

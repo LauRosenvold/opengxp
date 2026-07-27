@@ -1,0 +1,2 @@
+# {{ ansible_managed | default('Managed by Ansible — roles/automation_user') }}
+{{ automation_user_name }} ALL=(ALL) {{ 'NOPASSWD:' if automation_user_sudo_nopasswd else '' }}ALL

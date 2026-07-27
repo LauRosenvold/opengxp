@@ -1,0 +1,36 @@
+---
+- name: Render the registry configuration
+  ansible.builtin.template:
+    src: config.yml.j2
+    dest: "{{ registry_app_dir }}/config.yml"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart registry
+  # config.yml is bind-mounted file content, not part of the compose
+  # service definition itself — same reasoning as apps/netbox's
+  # nginx.conf, `docker compose up -d` won't notice this changed on its
+  # own.
+
+- name: Render docker-compose.yml
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ registry_app_dir }}/docker-compose.yml"
+    owner: root
+    group: root
+    mode: "0640"
+
+- name: Pull images and (re)create the stack to match the rendered config
+  ansible.builtin.command: >
+    docker compose -f {{ registry_app_dir }}/docker-compose.yml
+    up -d --remove-orphans
+  args:
+    chdir: "{{ registry_app_dir }}"
+  register: registry_compose_up
+  # Same best-effort changed_when heuristic as apps/netbox's compose
+  # task — docker compose's own progress output isn't a stable API to
+  # parse precisely.
+  changed_when: >-
+    'Started' in (registry_compose_up.stdout ~ registry_compose_up.stderr)
+    or 'Created' in (registry_compose_up.stdout ~ registry_compose_up.stderr)
+    or 'Recreated' in (registry_compose_up.stdout ~ registry_compose_up.stderr)

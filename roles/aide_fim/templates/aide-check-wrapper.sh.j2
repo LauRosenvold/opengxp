@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# {{ ansible_managed | default('Managed by Ansible — roles/aide_fim') }}
+#
+# Runs an AIDE integrity check and logs the outcome via syslog so
+# roles/logging_forward ships it off-box. AIDE's own exit code (0 = no
+# changes, non-zero = changes detected) is preserved so cron's own
+# failure-mail-on-nonzero-exit behavior still works as a secondary alert
+# path.
+
+set -uo pipefail
+
+OUTPUT="$(/usr/sbin/aide --check 2>&1)"
+RC=$?
+
+if [ "${RC}" -eq 0 ]; then
+  logger -t aide-gxp -p {{ aide_syslog_facility }} "AIDE check clean on $(hostname -f)"
+else
+  logger -t aide-gxp -p {{ aide_syslog_facility | replace('notice', 'warning') }} \
+    "AIDE check on $(hostname -f) detected changes (rc=${RC}) — review /var/log/aide-gxp-check.log"
+  printf '%s\n' "${OUTPUT}" >> /var/log/aide-gxp-check.log
+fi
+
+exit "${RC}"

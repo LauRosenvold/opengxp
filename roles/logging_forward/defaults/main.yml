@@ -1,0 +1,17 @@
+---
+# syslog_forward_* vars come from inventories/<env>/group_vars/all.yml,
+# where they default to disabled/placeholder until a real SIEM/log target
+# is named (see README.md "Integrations" assumption). This role is
+# deliberately inert until then — no CHANGEME value ever gets templated
+# into a running config.
+syslog_forward_enabled: false
+syslog_forward_target: ""
+syslog_forward_port: 6514
+syslog_forward_protocol: tls
+syslog_forward_ca_cert_src: ""
+
+# Disk-assisted queue so a network blip to the log target doesn't drop
+# audit-relevant events — they buffer locally until the link recovers.
+logging_forward_queue_max_disk_space: "1g"
+logging_forward_queue_dir: /var/lib/rsyslog/gxp-forward-queue
+logging_forward_resume_retry_count: -1   # retry forever rather than give up and drop events

@@ -1,0 +1,30 @@
+---
+- name: Ensure /etc/cron.allow exists, restricting cron to explicitly listed users
+  ansible.builtin.copy:
+    dest: /etc/cron.allow
+    content: |
+      {% for u in el10_baseline_cron_at_allow_users %}
+      {{ u }}
+      {% endfor %}
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: Ensure /etc/at.allow exists, restricting at to explicitly listed users
+  ansible.builtin.copy:
+    dest: /etc/at.allow
+    content: |
+      {% for u in el10_baseline_cron_at_allow_users %}
+      {{ u }}
+      {% endfor %}
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: Remove /etc/cron.deny and /etc/at.deny (allow-list takes precedence when both exist, remove ambiguity)
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/cron.deny
+    - /etc/at.deny

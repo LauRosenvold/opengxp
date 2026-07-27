@@ -1,0 +1,14 @@
+---
+# Dispatches purely on provisioning_hypervisor — each of
+# playbooks/provision_vm_vcenter.yml / provision_vm_hyperv.yml sets this
+# explicitly at the play level (outranking this role's own default) so
+# running the "wrong" playbook for your hypervisor can't silently do
+# nothing.
+
+- name: Provision via vCenter
+  ansible.builtin.include_tasks: vcenter.yml
+  when: provisioning_hypervisor == 'vcenter'
+
+- name: Provision via Hyper-V
+  ansible.builtin.include_tasks: hyperv.yml
+  when: provisioning_hypervisor == 'hyperv'

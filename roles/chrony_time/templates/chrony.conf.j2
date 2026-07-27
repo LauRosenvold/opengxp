@@ -1,0 +1,20 @@
+# {{ ansible_managed | default('Managed by Ansible — roles/chrony_time') }}
+# Time sync is a GxP record-integrity control, not just a nicety — every
+# electronic record's timestamp is only as trustworthy as this file.
+
+{% for server in chrony_ntp_servers %}
+server {{ server }} iburst
+{% endfor %}
+
+driftfile {{ chrony_driftfile }}
+makestep {{ chrony_makestep_threshold }} {{ chrony_makestep_limit }}
+{% if chrony_rtcsync %}
+rtcsync
+{% endif %}
+
+# This host is a time client only — it does not serve NTP to anyone else.
+# No `allow` directives on purpose; don't add one without a specific,
+# documented need (and firewalld_baseline won't have UDP/123 open anyway).
+
+logdir /var/log/chrony
+log measurements statistics tracking

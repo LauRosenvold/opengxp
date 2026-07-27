@@ -1,0 +1,77 @@
+---
+# Only meaningful on the first control-plane node — that's where
+# kubectl/admin.conf live and the API server is reachable locally without
+# going through whatever k8s_control_plane_endpoint LB you've set up.
+# k8s_cni_enabled is already checked by tasks/main.yml before this file
+# is even included.
+
+- name: Fetch the CNI manifest locally
+  ansible.builtin.get_url:
+    url: "{{ k8s_cni_manifest_url }}"
+    dest: /etc/kubernetes/cni-manifest.yaml
+    mode: "0600"
+    force: true
+  when: inventory_hostname == (groups['k8s_control_plane'] | first)
+
+- name: Patch Flannel's pod network CIDR to match k8s_pod_network_cidr
+  ansible.builtin.replace:
+    path: /etc/kubernetes/cni-manifest.yaml
+    regexp: '"Network":\s*"[0-9.]+/[0-9]+"'
+    replace: '"Network": "{{ k8s_pod_network_cidr }}"'
+  when:
+    - inventory_hostname == (groups['k8s_control_plane'] | first)
+    - k8s_cni_provider == 'flannel'
+  # Flannel's ConfigMap ships this as a live (uncommented) JSON value —
+  # a clean string substitution, unlike Calico's commented-out block below.
+
+- name: Patch Calico's pod network CIDR to match k8s_pod_network_cidr (best-effort)
+  ansible.builtin.replace:
+    path: /etc/kubernetes/cni-manifest.yaml
+    # Captures each line's original indentation and post-`#` content
+    # verbatim rather than hardcoding replacement indentation — the
+    # commented-out block already encodes correct YAML structure for
+    # when it's uncommented, so this just strips the `#` prefixes and
+    # swaps the CIDR value, instead of guessing spacing.
+    regexp: '(\s*)#(\s*-\s*name:\s*CALICO_IPV4POOL_CIDR)\s*\n(\s*)#(\s*value:\s*)"[0-9.]+/[0-9]+"'
+    replace: '\1\2\n\3\4"{{ k8s_pod_network_cidr }}"'
+  register: k8s_cni_calico_cidr_patch
+  when:
+    - inventory_hostname == (groups['k8s_control_plane'] | first)
+    - k8s_cni_provider == 'calico'
+  # Best-effort: this regex targets the specific commented-out block the
+  # pinned calico.yaml tag (see defaults/main.yml) ships as of this
+  # writing. Calico's manifest format has changed between releases
+  # before — if you bump k8s_cni_manifest_url_by_provider.calico, verify
+  # this still matches (the debug task right after tells you whether it
+  # did). If it doesn't match, Calico silently falls back to its own
+  # built-in default (192.168.0.0/16) regardless of k8s_pod_network_cidr,
+  # which happens to be this role's own default for Calico too — so this
+  # only bites you if you've customized k8s_pod_network_cidr AND the
+  # patch silently no-ops.
+
+- name: Report whether the Calico CIDR patch actually matched
+  ansible.builtin.debug:
+    msg: >-
+      {% if k8s_cni_calico_cidr_patch.changed %}
+      Calico manifest patched to use pod CIDR {{ k8s_pod_network_cidr }}.
+      {% else %}
+      WARNING: the CALICO_IPV4POOL_CIDR patch did not match anything in
+      the fetched manifest — Calico will use its own built-in default
+      instead of k8s_pod_network_cidr ({{ k8s_pod_network_cidr }}). See
+      the comment above this task in tasks/cni.yml.
+      {% endif %}
+  when:
+    - inventory_hostname == (groups['k8s_control_plane'] | first)
+    - k8s_cni_provider == 'calico'
+
+- name: Apply the CNI manifest
+  ansible.builtin.command: >
+    kubectl --kubeconfig=/etc/kubernetes/admin.conf
+    apply -f /etc/kubernetes/cni-manifest.yaml
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: k8s_cni_apply_result
+  changed_when: >-
+    'created' in (k8s_cni_apply_result.stdout | default(''))
+    or 'configured' in (k8s_cni_apply_result.stdout | default(''))
+  when: inventory_hostname == (groups['k8s_control_plane'] | first)

@@ -1,0 +1,51 @@
+---
+# Third-party content pinned by version/SHA for GxP change control:
+# every version bump here is itself a change-controlled event
+# (see docs/CHANGE_CONTROL.md) and must be re-validated before promotion
+# to the production inventory.
+
+collections:
+  - name: ansible.posix
+    version: "1.6.2"
+  - name: community.general
+    version: "9.4.0"
+  - name: ansible.utils
+    version: "5.1.2"
+  - name: redhat.rhel_system_roles
+    version: "1.85.0"
+  # provisioning/vm_provision (see docs/PROVISIONING.md) — VM creation
+  # against vCenter/Hyper-V, a fundamentally different kind of dependency
+  # from everything above: these two need Python libraries installed on
+  # the CONTROL NODE (wherever ansible-playbook actually runs), not on a
+  # managed target host, or the modules simply fail to import:
+  #   - community.vmware needs `pyvmomi` (pip install pyvmomi, or your
+  #     distro's equivalent) on the control node.
+  #   - ansible.windows needs `pywinrm` (pip install "pywinrm>=0.3.0") on
+  #     the control node for WinRM connections to the Hyper-V host to
+  #     work at all.
+  - name: community.vmware
+    version: "4.5.0"
+  - name: ansible.windows
+    version: "2.4.0"
+
+roles:
+  # CIS Benchmark automation, maintained by ansible-lockdown.
+  # RHEL9-CIS is mature/stable. RHEL10-CIS did not exist as usable,
+  # released content at the time this repo was authored — do NOT assume
+  # it is available. There is also no dedicated CIS automation role for
+  # AlmaLinux at all (any major version). roles/cis_hardening/ probes for
+  # RHEL10-CIS at run time and falls back to roles/el10_baseline_hardening
+  # (a hand-built role covering the same CIS domains, shared by both
+  # rhel10 and almalinux10 inventory groups) when it isn't installed.
+  # Re-check https://github.com/ansible-lockdown/RHEL10-CIS periodically
+  # and switch the fallback off for RHEL10 once that role is GA and
+  # validated — AlmaLinux10 stays on the fallback regardless, since
+  # upstream has given no indication it will ever ship Alma-specific
+  # content.
+  - name: ansible-lockdown.RHEL9-CIS
+    src: https://github.com/ansible-lockdown/RHEL9-CIS
+    version: "1.2.0"
+  - name: ansible-lockdown.RHEL10-CIS
+    src: https://github.com/ansible-lockdown/RHEL10-CIS
+    version: "main"
+    # NOTE: pin this to a tagged release as soon as one exists.

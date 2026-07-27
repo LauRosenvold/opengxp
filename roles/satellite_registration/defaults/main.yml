@@ -1,0 +1,24 @@
+---
+# Registration is on by default, but some OS groups may not use Satellite
+# at all (e.g. an AlmaLinux host pointed at public AlmaLinux mirrors
+# instead — see inventories/production/group_vars/almalinux10.yml). Set
+# satellite_registration_enabled: false per-group to skip this role
+# entirely for those hosts rather than forcing every OS through RHSM/
+# Satellite registration.
+satellite_registration_enabled: true
+
+# satellite_server / satellite_organization / satellite_capsule come from
+# inventories/<env>/group_vars/all.yml. satellite_activation_key must be
+# supplied via an ansible-vault-encrypted group_vars/all.vault.yml — there
+# is deliberately no default here, so a missing key fails loudly instead
+# of silently registering with nothing.
+satellite_activation_key: ""
+
+# Which repos/content this host gets should be defined by the activation
+# key in Satellite (org > activation key > content view + repo set), not
+# hardcoded per-host in Ansible. If you find yourself wanting a
+# `satellite_registration_repos` var here, that's a sign the activation
+# key needs a new content view instead — keep content lifecycle
+# management inside Satellite, where your patch/change process already
+# expects to look for it.
+satellite_force_reregister: false

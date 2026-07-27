@@ -1,0 +1,26 @@
+---
+# Regulated-estate hosts that are not themselves a source of GxP records
+# (jump hosts, internal tooling, CI runners, non-validated app tiers).
+# Baseline CIS posture applies; nothing here waives a control, it just
+# doesn't add the extra critical-tier margin.
+
+gxp_tier: standard
+
+ssh_client_alive_interval: 900
+ssh_client_alive_count_max: 3
+tmout_shell_seconds: 1800
+account_password_max_days: 90
+account_inactive_lock_days: 30
+
+auditd_gxp_extra_watches_enabled: false
+auditd_max_log_file_mb: 50
+auditd_num_logs: 10
+auditd_space_left_action: "email"
+auditd_admin_space_left_action: "suspend"
+
+aide_check_schedule_cron: "0 2 * * *"   # daily at 02:00
+
+patch_requires_change_ticket: false
+patch_window_cron: "0 3 * * 6"   # Saturdays 03:00, standard maintenance cadence
+
+fips_mode_enabled: false

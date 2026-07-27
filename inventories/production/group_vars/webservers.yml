@@ -1,0 +1,4 @@
+---
+firewalld_rules:
+  - { service: http }
+  - { service: https }

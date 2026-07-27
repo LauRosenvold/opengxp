@@ -1,0 +1,52 @@
+---
+environment_name: validation
+
+# --- Automation account -------------------------------------------------------
+# See the note in inventories/production/group_vars/all.yml — same rule
+# applies here. Use a DIFFERENT keypair than production's/staging's.
+automation_user_name: svc_ansible
+automation_user_ssh_public_keys: []
+#   - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI... validation-ci-runner"   # CHANGEME
+automation_user_sudo_nopasswd: true
+
+satellite_server: "satellite.gxp.example.internal"         # CHANGEME
+satellite_organization: "GxP-Enterprise"                    # CHANGEME
+satellite_capsule: "capsule-validation.gxp.example.internal" # CHANGEME
+
+ntp_servers:
+  - "ntp1.gxp.example.internal"
+  - "ntp2.gxp.example.internal"
+
+syslog_forward_enabled: false
+syslog_forward_target: "CHANGEME-siem-validation.gxp.example.internal"
+syslog_forward_port: 6514
+syslog_forward_protocol: "tls"
+syslog_forward_ca_cert_src: "CHANGEME"
+
+# See docs/IDENTITY.md once you enable this.
+identity_backend_enabled: false
+identity_domain: "CHANGEME.gxp.example.internal"
+identity_backend: "ad"
+identity_allowed_groups: []
+#   - "gxp-linux-admins"   # CHANGEME — must resolve via `getent group` once joined
+
+system_timezone: "UTC"
+system_locale: "en_US.UTF-8"
+
+login_banner_text: |
+  WARNING: This system is for authorized use only. All activity is logged,
+  monitored, and subject to audit in accordance with company policy and
+  applicable GxP regulations. Unauthorized access is prohibited and may be
+  subject to disciplinary action and/or legal proceedings.
+
+fips_mode_enabled: false
+
+# --- Hypervisor VM provisioning (vCenter) --------------------------------------
+# See the note in inventories/production/group_vars/all.yml — same rule
+# applies here.
+vcenter_hostname: "CHANGEME"
+vcenter_username: "CHANGEME"
+vcenter_datacenter: "CHANGEME"
+vcenter_cluster: "CHANGEME"
+vcenter_datastore: "CHANGEME"
+vcenter_network_portgroup: "CHANGEME"

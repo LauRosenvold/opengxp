@@ -1,0 +1,34 @@
+# {{ ansible_managed | default('Managed by Ansible — server_roles/postgresql_server') }}
+# Fully replaces the packaged pg_hba.conf — same "manage the whole file"
+# approach as roles/ssh_hardening's sshd_config, rather than patching the
+# default in place. Deny-by-default: nothing here, no access.
+#
+# TYPE      DATABASE        USER                    ADDRESS                 METHOD
+
+# Local socket connections (OS-level peer auth — postgres OS user only,
+# used by this role's own psql invocations via become_user: postgres).
+local       all             all                                             peer
+
+# Loopback, still SSL-required if enabled (self-connections from the host
+# itself, e.g. maintenance scripts running as a non-postgres OS user).
+{{ 'hostssl' if postgresql_ssl_enabled else 'host' }}       all             all             127.0.0.1/32            scram-sha-256
+{{ 'hostssl' if postgresql_ssl_enabled else 'host' }}       all             all             ::1/128                 scram-sha-256
+
+{% if postgresql_allowed_hosts | length > 0 %}
+# Explicitly allowed application/client networks.
+{% for cidr in postgresql_allowed_hosts %}
+{{ 'hostssl' if postgresql_ssl_enabled else 'host' }}       all             all             {{ cidr }}              scram-sha-256
+{% endfor %}
+{% endif %}
+
+{% if postgresql_role == 'primary' %}
+# Replication entries, derived from inventory hostvars — any host in
+# dbservers with postgresql_role: replica and postgresql_primary_host
+# pointing at this host gets an entry automatically, no manual IP
+# bookkeeping here.
+{% for h in groups['dbservers'] %}
+{% if hostvars[h].postgresql_role | default('standalone') == 'replica' and hostvars[h].postgresql_primary_host | default('') == inventory_hostname %}
+{{ 'hostssl' if postgresql_ssl_enabled else 'host' }}       replication     {{ postgresql_replication_user }}       {{ hostvars[h].ansible_host | default(h) }}/32         scram-sha-256
+{% endif %}
+{% endfor %}
+{% endif %}

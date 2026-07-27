@@ -1,0 +1,44 @@
+---
+# CANONICAL COPY LIVES IN inventories/production/group_vars/registry_hosts.yml
+# See the note in staging/group_vars/rhel9.yml — same rule applies here.
+#
+# Runs apps/registry (see playbooks/registry.yml — NOT part of
+# playbooks/site.yml). Every host here should ALSO be in docker_hosts —
+# see the note in hosts.yml.
+#
+# Zone-wide open within roles/firewalld_baseline's default-deny zone —
+# same documented gap as the other application/platform groups (see
+# docs/APPS.md and docs/SERVER_ROLES.md). Keep in sync with
+# registry_https_port below if you change it from the default. The UI
+# port is loopback-bound by default (see apps/registry/defaults) so it
+# doesn't need a firewalld rule unless you also change
+# registry_ui_bind_address.
+firewalld_rules:
+  - { port: "443/tcp" }
+
+# --- Identity --------------------------------------------------------------
+# What clients pull from: `docker pull <registry_hostname>/myimage`.
+# Fails loudly (see apps/registry/tasks/secrets.yml) until set:
+# registry_hostname: registry.gxp.example.internal
+
+# --- Authentication ----------------------------------------------------------
+# Fails loudly if empty — supply via an ansible-vault encrypted
+# group_vars/host_vars file, e.g.
+# inventories/production/group_vars/registry_hosts.vault.yml:
+#   registry_users:
+#     - { username: "ci-pipeline", password: "{{ vault_registry_ci_password }}" }
+#     - { username: "svc_ansible_pull", password: "{{ vault_registry_pull_password }}" }
+
+# --- TLS -----------------------------------------------------------------------
+# Self-signed by default (see apps/registry/defaults/main.yml). Every
+# Docker host that needs to pull from this registry must then trust that
+# cert via server_roles/docker_host's docker_trusted_registry_cas — or
+# point these at a real CA-issued cert/key to skip that distribution step:
+# registry_ssl_cert_src: "/path/on/control/node/registry.crt"
+# registry_ssl_key_src: "/path/on/control/node/registry.key"
+
+# --- Retention ---------------------------------------------------------------
+# Off by default — images are immutable once pushed (see
+# apps/registry/defaults/main.yml for the rationale). Only turn this on
+# with a documented image retention policy:
+# registry_delete_enabled: true

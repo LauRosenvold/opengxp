@@ -1,0 +1,100 @@
+---
+# NetBox (netbox-community/netbox-docker-style deployment) on top of an
+# already-provisioned server_roles/docker_host. This is application
+# deployment, not platform enablement — see docs/APPS.md for why it
+# lives in apps/, a third tier below server_roles/. Runs against the
+# `netbox_hosts` inventory group; every host in it should also be in
+# `docker_hosts` (playbooks/docker_host.yml must have already run there).
+
+# --- Image / version -----------------------------------------------------------
+# netbox-docker's tags combine the image-build version and the NetBox
+# app version (vX.Y-Z.W). Pin deliberately, bump deliberately — same
+# convention as server_roles/kubernetes_node's CNI manifest pins. Mirror
+# these into a private/Satellite-adjacent registry for a real GxP estate
+# rather than pulling docker.io directly at deploy time — see
+# docs/APPS.md. server_roles/docker_host's docker_content_trust_enabled,
+# if turned on, covers pulls for this role too (same daemon, same host).
+netbox_image: "docker.io/netboxcommunity/netbox:v4.1-3.0.2"
+netbox_redis_image: "docker.io/redis:7-alpine"
+netbox_postgres_image: "docker.io/postgres:16-alpine"   # only used when netbox_external_database_enabled is false
+netbox_nginx_image: "docker.io/nginxinc/nginx-unprivileged:1.27-alpine"
+
+# --- Filesystem layout -----------------------------------------------------------
+netbox_app_dir: /opt/netbox
+netbox_data_dir: "{{ netbox_app_dir }}/data"   # bind-mounted host paths, not opaque Docker volumes — visible/auditable on disk, and what an actual backup job would target
+
+# UID the netbox/postgres/redis container images run their main process
+# as — needed so bind-mounted host directories are actually writable by
+# the (non-root, by design) container process. 999 matches the current
+# pinned image tags above; verify it hasn't changed if you bump them
+# (`docker run --rm <image> id` is the quickest check).
+netbox_container_uid: "999"
+
+# --- Database ----------------------------------------------------------------------
+# Recommended: point at a hardened server_roles/postgresql_server host
+# (the dbservers group) rather than the bundled container — real backup
+# mechanism, pgAudit, TLS, everything that role already gives you. The
+# bundled postgres container is a lab/evaluation fallback only, same
+# posture as this repo's other "off unless deliberately chosen" defaults.
+netbox_external_database_enabled: true
+netbox_database_host: "CHANGEME"   # inventory_hostname of the dbservers host (must be in the same inventory)
+netbox_database_port: 5432
+netbox_database_name: netbox
+netbox_database_user: netbox
+netbox_database_password: ""       # vaulted, no default — fails loudly if empty
+
+# When true (and netbox_external_database_enabled is true), this role
+# reaches into netbox_database_host itself (delegate_to) and creates the
+# database/role there via psql — the same become_user: postgres pattern
+# server_roles/postgresql_server uses for its own replication role. Set
+# false if your DB team provisions application databases separately.
+netbox_manage_external_database: true
+
+# This role doesn't load server_roles/postgresql_server's own variables
+# (delegate_to changes which host runs a task, not which play/role's
+# defaults are in scope) — so the psql binary path is spelled out here
+# independently. Match it to whatever PostgreSQL major version
+# netbox_database_host actually runs (PGDG's layout is
+# /usr/pgsql-<version>/bin/psql — see
+# server_roles/postgresql_server/defaults/main.yml's postgresql_version).
+netbox_database_psql_path: "/usr/pgsql-16/bin/psql"
+
+# --- Redis -----------------------------------------------------------------------
+# Always containerized (ephemeral cache + RQ task queue, not a GxP record
+# store) — see docs/APPS.md for why this isn't externalized the way the
+# database is.
+netbox_redis_password: ""         # vaulted, no default
+netbox_redis_cache_password: ""   # vaulted, no default — deliberately a DIFFERENT password than netbox_redis_password
+
+# --- Application-level secrets ----------------------------------------------------
+# Django's SECRET_KEY — signs sessions/cookies/CSRF tokens. No default:
+# auto-generating one silently would mean nobody actually has a record of
+# it, and rotating it invalidates every active session, so this has to be
+# a deliberate, recorded value, not a surprise.
+netbox_secret_key: ""
+netbox_superuser_name: admin
+netbox_superuser_email: "CHANGEME@gxp.example.internal"
+netbox_superuser_password: ""   # vaulted, no default
+
+# NetBox's own Django ALLOWED_HOSTS — must match whatever hostname
+# clients actually use or every request gets rejected with a 400.
+netbox_allowed_hosts:
+  - "CHANGEME.gxp.example.internal"
+
+# --- TLS -----------------------------------------------------------------------
+# Same self-signed-default/real-cert-pluggable pattern as
+# server_roles/postgresql_server's TLS handling. An nginx container
+# terminates TLS and reverse-proxies to netbox over the internal compose
+# network in plaintext (container-to-container on a private bridge, not
+# exposed to the host network).
+netbox_tls_dir: "{{ netbox_app_dir }}/tls"
+netbox_ssl_cert_src: ""
+netbox_ssl_key_src: ""
+netbox_ssl_self_signed_days: 825
+netbox_https_port: 443
+
+# --- Worker scaling ----------------------------------------------------------
+# Plain `docker compose` has no YAML-level replica count (that's a Swarm
+# thing) — this is applied via `--scale` at deploy time instead, see
+# tasks/compose.yml.
+netbox_worker_replicas: 1

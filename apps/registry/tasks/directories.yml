@@ -1,0 +1,24 @@
+---
+- name: Ensure the registry application directory exists
+  ansible.builtin.file:
+    path: "{{ registry_app_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Ensure the registry storage directory exists
+  ansible.builtin.file:
+    path: "{{ registry_storage_dir }}"
+    state: directory
+    owner: "{{ registry_container_uid }}"
+    group: "{{ registry_container_uid }}"
+    mode: "0750"
+
+- name: Ensure the auth directory exists (holds the htpasswd file, not bind-mounted anywhere world-readable)
+  ansible.builtin.file:
+    path: "{{ registry_app_dir }}/auth"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"

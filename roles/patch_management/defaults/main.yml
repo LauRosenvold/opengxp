@@ -1,0 +1,14 @@
+---
+# patch_requires_change_ticket / patch_window_cron come from the gxp_tier
+# group_vars (gxp_critical.yml vs gxp_standard.yml). This role does NOT
+# implement its own scheduler — patch_window_cron is metadata for whatever
+# triggers `playbooks/patch_management.yml` externally (a CI runner's
+# cron/pipeline schedule, or an AAP schedule if you adopt AAP later).
+# Running this playbook outside that window is a process violation even
+# though nothing here technically stops it — see docs/CHANGE_CONTROL.md.
+
+patch_security_only: false        # true = `dnf update --security` instead of full update
+patch_reboot_allowed: true
+patch_reboot_timeout_seconds: 900
+patch_exclude_packages: []        # e.g. ["kernel*"] to hold kernel updates for a separate, reviewed step
+patch_max_updates_report_lines: 200

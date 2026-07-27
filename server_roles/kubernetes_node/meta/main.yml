@@ -1,0 +1,16 @@
+---
+galaxy_info:
+  role_name: kubernetes_node
+  description: >-
+    Vanilla kubeadm Kubernetes node setup (control-plane and worker),
+    multi-minor-version support via pkgs.k8s.io per-version repos,
+    pluggable container runtime (containerd/CRI-O), pluggable CNI
+    (Calico/Flannel), optional MetalLB (L2 mode), audit/encryption-at-rest,
+    and a gated upgrade path. Lives in server_roles/, not roles/ — see
+    docs/SERVER_ROLES.md.
+  license: Apache-2.0
+  min_ansible_version: "2.15"
+  platforms:
+    - name: EL
+      versions: ["9", "10"]
+dependencies: []

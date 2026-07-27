@@ -1,0 +1,14 @@
+*.retry
+.ansible_fact_cache/
+logs/
+collections/
+roles/ansible-lockdown.*
+.vault_pass
+*.vault_pass
+*.pem
+*.key
+inventories/*/host_vars/*.vault.yml
+.molecule/
+__pycache__/
+*.pyc
+.cache/

@@ -1,0 +1,72 @@
+---
+- name: Ensure rsyslog and TLS support are installed
+  ansible.builtin.dnf:
+    name:
+      - rsyslog
+      - rsyslog-gnutls
+    state: present
+
+- name: Ensure rsyslog is enabled and running
+  ansible.builtin.systemd:
+    name: rsyslog
+    state: started
+    enabled: true
+
+- name: Warn when central log forwarding is not yet configured
+  ansible.builtin.debug:
+    msg: >-
+      NOTE: syslog_forward_enabled is false for {{ inventory_hostname }} —
+      logs (including auditd/AIDE/sshd output) stay local-only. This is an
+      open item for your validation package (see docs/VALIDATION.md,
+      "Operational Qualification"): a validated system should have its
+      security-relevant events shipped off-box before local tampering
+      becomes possible. Set syslog_forward_target and
+      syslog_forward_enabled: true in group_vars/all.yml once a SIEM/log
+      target is available.
+  when: not (syslog_forward_enabled | bool)
+
+- name: Remove any previously deployed forwarding config if now disabled
+  ansible.builtin.file:
+    path: /etc/rsyslog.d/60-gxp-forward.conf
+    state: absent
+  when: not (syslog_forward_enabled | bool)
+  notify: Restart rsyslog
+
+- name: Push the log-forwarding CA certificate
+  ansible.builtin.copy:
+    src: "{{ syslog_forward_ca_cert_src }}"
+    dest: /etc/pki/tls/certs/gxp-log-forward-ca.pem
+    owner: root
+    group: root
+    mode: "0644"
+  when:
+    - syslog_forward_enabled | bool
+    - syslog_forward_ca_cert_src | length > 0
+    - syslog_forward_ca_cert_src != 'CHANGEME'
+  notify: Restart rsyslog
+
+- name: Ensure the disk-assisted queue spool directory exists
+  ansible.builtin.file:
+    path: "{{ logging_forward_queue_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  when: syslog_forward_enabled | bool
+
+- name: Deploy central log forwarding config
+  ansible.builtin.template:
+    src: rsyslog_forward.conf.j2
+    dest: /etc/rsyslog.d/60-gxp-forward.conf
+    owner: root
+    group: root
+    mode: "0644"
+    # No `validate` here: rsyslogd -N1 checks a complete config, and this
+    # is a conf.d snippet meant to be included by /etc/rsyslog.conf — it
+    # will report false errors in isolation. Verify post-deploy instead
+    # with `rsyslogd -N1` against the full config if you need a gate.
+  when:
+    - syslog_forward_enabled | bool
+    - syslog_forward_target | length > 0
+    - syslog_forward_target != 'CHANGEME'
+  notify: Restart rsyslog

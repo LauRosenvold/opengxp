@@ -1,0 +1,48 @@
+---
+- name: Determine whether we're falling back to the public PGDG repo RPM
+  ansible.builtin.set_fact:
+    postgresql_using_public_repo: "{{ postgresql_repo_baseurl == 'CHANGEME' }}"
+
+- name: Warn when bypassing Satellite for PostgreSQL content
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: {{ inventory_hostname }} is using the public PGDG repo RPM
+      directly instead of a Satellite-managed content view for PostgreSQL
+      {{ postgresql_version }}. Fine for lab/evaluation — see
+      docs/SERVER_ROLES.md.
+  when: postgresql_using_public_repo
+
+- name: Configure Satellite-hosted PGDG repo
+  ansible.builtin.yum_repository:
+    name: "pgdg{{ postgresql_version }}-satellite"
+    description: "PostgreSQL {{ postgresql_version }} (Satellite-managed content view)"
+    baseurl: "{{ postgresql_repo_baseurl }}"
+    gpgkey: "{{ postgresql_repo_gpgkey }}"
+    gpgcheck: true
+    enabled: true
+  when: not postgresql_using_public_repo
+
+- name: Install the public PGDG repo RPM (fallback only)
+  ansible.builtin.dnf:
+    name: "{{ postgresql_public_repo_rpm_url }}"
+    state: present
+    disable_gpg_check: true
+  when: postgresql_using_public_repo
+
+- name: Disable the built-in AppStream postgresql module (conflicts with PGDG packages)
+  ansible.builtin.command: dnf -y module disable postgresql
+  register: postgresql_module_disable_result
+  changed_when: "'Nothing to do' not in (postgresql_module_disable_result.stdout | default(''))"
+
+- name: Install PostgreSQL server and contrib packages
+  ansible.builtin.dnf:
+    name:
+      - "postgresql{{ postgresql_version }}-server"
+      - "postgresql{{ postgresql_version }}-contrib"
+    state: present
+
+- name: Install pgAudit
+  ansible.builtin.dnf:
+    name: "{{ postgresql_pgaudit_package }}"
+    state: present
+  when: postgresql_pgaudit_enabled | bool

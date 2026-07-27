@@ -1,0 +1,138 @@
+---
+# Runs against the whole k8s_control_plane group but every task below is
+# explicitly guarded to the FIRST host in that group
+# (groups['k8s_control_plane'] | first) — the one that runs `kubeadm
+# init`. Additional control-plane nodes are handled by
+# control_plane_join.yml instead.
+
+- name: Check whether this control-plane node is already initialized
+  ansible.builtin.stat:
+    path: /etc/kubernetes/admin.conf
+  register: k8s_admin_conf_stat
+
+- name: Capture kubeadm's own binary version
+  ansible.builtin.command: kubeadm version -o short
+  register: k8s_kubeadm_version_result
+  changed_when: false
+  when:
+    - inventory_hostname == (groups['k8s_control_plane'] | first)
+    - not k8s_admin_conf_stat.stat.exists
+
+- name: Record the version kubeadm will target (avoids a config/binary mismatch)
+  ansible.builtin.set_fact:
+    k8s_installed_version: "{{ k8s_kubeadm_version_result.stdout | trim }}"
+  when:
+    - inventory_hostname == (groups['k8s_control_plane'] | first)
+    - not k8s_admin_conf_stat.stat.exists
+
+- name: Deploy the API server audit policy
+  ansible.builtin.template:
+    src: audit-policy.yaml.j2
+    dest: /etc/kubernetes/audit-policy.yaml
+    owner: root
+    group: root
+    mode: "0600"
+  when:
+    - inventory_hostname == (groups['k8s_control_plane'] | first)
+    - not k8s_admin_conf_stat.stat.exists
+
+- name: Fail loudly if encryption-at-rest is enabled with no key supplied
+  ansible.builtin.assert:
+    that:
+      - k8s_encryption_at_rest_key | length > 0
+    fail_msg: >-
+      k8s_encryption_at_rest_enabled is true but k8s_encryption_at_rest_key
+      is empty. Supply it via an ansible-vault encrypted group_vars
+      file — do not put it here in plaintext.
+  when:
+    - k8s_encryption_at_rest_enabled | bool
+    - inventory_hostname == (groups['k8s_control_plane'] | first)
+    - not k8s_admin_conf_stat.stat.exists
+
+- name: Deploy the etcd Secrets encryption config
+  ansible.builtin.template:
+    src: encryption-config.yaml.j2
+    dest: /etc/kubernetes/encryption-config.yaml
+    owner: root
+    group: root
+    mode: "0600"
+  when:
+    - k8s_encryption_at_rest_enabled | bool
+    - inventory_hostname == (groups['k8s_control_plane'] | first)
+    - not k8s_admin_conf_stat.stat.exists
+
+- name: Render the kubeadm init configuration
+  ansible.builtin.template:
+    src: kubeadm-config.yaml.j2
+    dest: /etc/kubernetes/kubeadm-init-config.yaml
+    owner: root
+    group: root
+    mode: "0600"
+  when:
+    - inventory_hostname == (groups['k8s_control_plane'] | first)
+    - not k8s_admin_conf_stat.stat.exists
+
+- name: Run kubeadm init on the first control-plane node
+  ansible.builtin.command: >
+    kubeadm init
+    --config=/etc/kubernetes/kubeadm-init-config.yaml
+    --upload-certs
+  when:
+    - inventory_hostname == (groups['k8s_control_plane'] | first)
+    - not k8s_admin_conf_stat.stat.exists
+  changed_when: true
+
+- name: Deploy the default kubeconfig for the automation account (root-owned, key-auth-only account per roles/automation_user)
+  ansible.builtin.file:
+    path: "{{ automation_user_home | default('/root') }}/.kube"
+    state: directory
+    owner: "{{ automation_user_name | default('root') }}"
+    group: "{{ automation_user_name | default('root') }}"
+    mode: "0700"
+  when:
+    - inventory_hostname == (groups['k8s_control_plane'] | first)
+
+- name: Symlink admin.conf for kubectl convenience (still root-only permissions on the source file)
+  ansible.builtin.file:
+    src: /etc/kubernetes/admin.conf
+    dest: "{{ automation_user_home | default('/root') }}/.kube/config"
+    state: link
+    force: true
+  when:
+    - inventory_hostname == (groups['k8s_control_plane'] | first)
+
+# --- Regenerated on every run, whether or not init ran this time — any
+# control-plane host reaching this point has a working admin.conf. This
+# is what makes the role safe to re-run when adding new nodes later:
+# join tokens/certificate keys are short-lived by design, so we always
+# hand out a fresh one rather than trying to persist/reuse an old one.
+
+- name: Generate a fresh join command for worker nodes
+  ansible.builtin.command: kubeadm token create --print-join-command
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: k8s_worker_join_command_result
+  changed_when: false
+  when: inventory_hostname == (groups['k8s_control_plane'] | first)
+
+- name: Record the worker join command for other hosts to read via hostvars
+  ansible.builtin.set_fact:
+    k8s_worker_join_command: "{{ k8s_worker_join_command_result.stdout | trim }}"
+  when: inventory_hostname == (groups['k8s_control_plane'] | first)
+
+- name: Generate a fresh certificate key for additional control-plane joins
+  ansible.builtin.command: kubeadm init phase upload-certs --upload-certs
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: k8s_certificate_key_result
+  changed_when: false
+  when:
+    - inventory_hostname == (groups['k8s_control_plane'] | first)
+    - groups['k8s_control_plane'] | length > 1
+
+- name: Record the certificate key for other control-plane hosts to read via hostvars
+  ansible.builtin.set_fact:
+    k8s_certificate_key: "{{ k8s_certificate_key_result.stdout_lines | last }}"
+  when:
+    - inventory_hostname == (groups['k8s_control_plane'] | first)
+    - groups['k8s_control_plane'] | length > 1

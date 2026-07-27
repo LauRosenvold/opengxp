@@ -1,0 +1,53 @@
+---
+# Only for postgresql_role: replica. A replica's data directory comes
+# from a base backup of the primary, never from initdb — see
+# tasks/initdb.yml's own header comment.
+
+- name: Fail loudly if a replica has no primary configured
+  ansible.builtin.assert:
+    that:
+      - postgresql_primary_host | length > 0
+    fail_msg: >-
+      postgresql_role is 'replica' on {{ inventory_hostname }} but
+      postgresql_primary_host is empty — set it (in host_vars) to the
+      inventory_hostname of the primary to stream from.
+
+- name: Fail loudly if replication credentials are missing
+  ansible.builtin.assert:
+    that:
+      - postgresql_replication_password | length > 0
+    fail_msg: >-
+      postgresql_role is 'replica' on {{ inventory_hostname }} but
+      postgresql_replication_password is empty. Supply it via an
+      ansible-vault encrypted group_vars/host_vars file — do not put it
+      here in plaintext.
+
+- name: Check whether the data directory is already populated
+  ansible.builtin.stat:
+    path: "{{ postgresql_data_dir }}/PG_VERSION"
+  register: postgresql_replica_pgversion_stat
+
+- name: Ensure the data directory exists with correct ownership before pg_basebackup
+  ansible.builtin.file:
+    path: "{{ postgresql_data_dir }}"
+    state: directory
+    owner: postgres
+    group: postgres
+    mode: "0700"
+  when: not postgresql_replica_pgversion_stat.stat.exists
+
+- name: Take a base backup from the primary and configure standby mode
+  ansible.builtin.command: >
+    {{ postgresql_bin_dir }}/pg_basebackup
+    -h {{ hostvars[postgresql_primary_host].ansible_host | default(postgresql_primary_host) }}
+    -D {{ postgresql_data_dir }}
+    -U {{ postgresql_replication_user }}
+    -P -Xstream -R
+  become_user: postgres
+  environment:
+    PGPASSWORD: "{{ postgresql_replication_password }}"
+  when: not postgresql_replica_pgversion_stat.stat.exists
+  changed_when: true
+  # -R writes standby.signal + primary_conninfo into postgresql.auto.conf
+  # automatically — tasks/config.yml's template deployment afterward
+  # doesn't touch either file, so this survives.

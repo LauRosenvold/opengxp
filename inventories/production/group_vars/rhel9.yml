@@ -1,0 +1,19 @@
+---
+# Vars specific to the rhel9 inventory group.
+
+ansible_python_interpreter: /usr/bin/python3.9
+
+# roles/cis_hardening dispatches on this. RHEL9-CIS is mature/stable
+# upstream content (see requirements.yml) — use it directly, no fallback.
+cis_hardening_engine: "lockdown_role"
+cis_hardening_role_name: "ansible-lockdown.RHEL9-CIS"
+
+# ansible-lockdown.RHEL9-CIS section toggles (this repo overrides its
+# section4/section5/section6-adjacent SSH+audit+sudo behavior with our own
+# roles run afterward — see docs/BASELINE_MAPPING.md — so we disable the
+# overlapping subsections here to avoid two roles fighting over the same
+# file).
+rhel9cis_section4_disable: true   # auditd handled by roles/auditd_gxp instead
+rhel9cis_section5_ssh_disable: true  # SSH handled by roles/ssh_hardening instead
+rhel9cis_bootloader_password: false  # set true once a vaulted grub password is supplied
+rhel9cis_rule_5_4_1_1: false          # example: per-control opt-out pattern; document any use of this in the change ticket

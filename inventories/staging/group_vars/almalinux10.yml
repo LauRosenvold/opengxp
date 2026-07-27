@@ -1,0 +1,28 @@
+---
+# CANONICAL COPY LIVES IN inventories/production/group_vars/almalinux10.yml
+# See the note in staging/group_vars/rhel9.yml — same rule applies here.
+#
+# Vars specific to the almalinux10 inventory group. AlmaLinux 10 is
+# binary-compatible with RHEL 10 at the package/systemd/PAM level, so this
+# largely mirrors inventories/production/group_vars/rhel10.yml — kept as a
+# separate group (not folded into rhel10) so the inventory always shows
+# the real OS/support vendor at a glance. See docs/BASELINE_MAPPING.md.
+
+ansible_python_interpreter: /usr/bin/python3.12
+
+# No CIS/STIG automation role exists for AlmaLinux specifically (nor does
+# one exist yet for RHEL10 — see rhel10.yml's note). Both share the same
+# hand-built fallback role since the underlying controls are identical
+# for this OS family at this major version.
+cis_hardening_engine: "fallback_role"
+cis_hardening_role_name: "el10_baseline_hardening"
+
+# AlmaLinux carries no Red Hat subscription entitlement, so there is
+# nothing for subscription-manager to "consume" — but Satellite/Katello
+# can still register and content-manage a non-RHEL client against a
+# custom AlmaLinux content view mapped to the same activation key
+# mechanism. If your Satellite doesn't manage AlmaLinux hosts and you
+# instead point them at public AlmaLinux mirrors directly, set this to
+# false and manage repos outside this repo (roles/patch_management still
+# works against whatever repos dnf sees either way).
+satellite_registration_enabled: true

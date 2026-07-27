@@ -1,0 +1,51 @@
+---
+# CANONICAL COPY LIVES IN inventories/production/group_vars/k8s_nodes.yml
+# This is the IQ/OQ/PQ execution environment (see docs/VALIDATION.md) —
+# it must match production control policy exactly.
+#
+# Shared by both k8s_control_plane and k8s_workers. Role-specific vars
+# (firewalld_rules, anything that differs between the two) live in
+# group_vars/k8s_control_plane.yml / group_vars/k8s_workers.yml instead.
+
+# --- Undo the fleet-wide "no IP forwarding" baseline for these hosts only ----
+# Same reasoning as inventories/production/group_vars/docker_hosts.yml —
+# see that file's comments and docs/SERVER_ROLES.md for the caveat about
+# a later hardening.yml re-run on rhel9 potentially flipping this back
+# until server_roles/kubernetes_node next runs and re-asserts it.
+el10_baseline_ip_forward_enabled: true
+rhel9cis_rule_3_1_1: false   # best-effort — verify against your installed ansible-lockdown.RHEL9-CIS version
+
+# --- Container runtime / CNI / MetalLB choices ---------------------------------
+# Defaults live in server_roles/kubernetes_node/defaults/main.yml
+# (containerd + Calico, MetalLB off) — surfaced here as the actual
+# decision points for this cluster. Uncomment/change to switch:
+# k8s_container_runtime: crio          # containerd (default) | crio
+# k8s_cni_provider: flannel            # calico (default) | flannel
+# k8s_metallb_enabled: true            # requires k8s_metallb_address_pools below
+# k8s_metallb_address_pools:
+#   - "10.20.30.100-10.20.30.150"      # CHANGEME — real, unused IP range on your network
+
+# --- Kubernetes / container runtime content source -----------------------------
+# Left at server_roles/kubernetes_node's own CHANGEME defaults here on
+# purpose — fill in once synced into Satellite (see docs/SERVER_ROLES.md):
+# k8s_repo_baseurl: "https://satellite.gxp.example.internal/pulp/repos/GxP-Enterprise/production/kubernetes-v1.31"
+# k8s_repo_gpgkey: "https://satellite.gxp.example.internal/pub/RPM-GPG-KEY-kubernetes"
+# containerd_repo_baseurl: "https://satellite.gxp.example.internal/pulp/repos/GxP-Enterprise/production/docker-ce"
+# containerd_repo_gpgkey: "https://satellite.gxp.example.internal/pub/RPM-GPG-KEY-docker"
+# crio_repo_baseurl: "https://satellite.gxp.example.internal/pulp/repos/GxP-Enterprise/production/cri-o-v1.31"
+# crio_repo_gpgkey: "https://satellite.gxp.example.internal/pub/RPM-GPG-KEY-cri-o"
+
+# --- Version --------------------------------------------------------------
+# Set here (not per control-plane/worker group) so the whole cluster
+# stays on one version outside of a deliberate, staged upgrade — see
+# playbooks/kubernetes_upgrade.yml. If you're mid-upgrade and testing a
+# new minor version on a subset of workers first, override k8s_version in
+# host_vars for just those hosts rather than changing it here.
+k8s_version: "1.31"
+
+# --- HA control plane endpoint -------------------------------------------------
+# Empty = single control-plane node. Required if
+# inventories/production/hosts.yml's k8s_control_plane group ever has
+# more than one host — an external LB/VIP you provide, this repo does not
+# stand one up. See docs/SERVER_ROLES.md.
+k8s_control_plane_endpoint: ""   # CHANGEME, e.g. "k8s-api.gxp.example.internal:6443"

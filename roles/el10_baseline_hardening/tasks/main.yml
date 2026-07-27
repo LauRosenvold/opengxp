@@ -1,0 +1,36 @@
+---
+- name: Filesystem / legacy filesystem module restrictions
+  ansible.builtin.include_tasks: filesystem.yml
+  when: el10_baseline_filesystem_enabled | bool
+
+- name: Uncommon network protocol kernel modules
+  ansible.builtin.include_tasks: kernel_modules.yml
+  when: el10_baseline_kernel_modules_enabled | bool
+
+- name: Network/kernel sysctl hardening
+  ansible.builtin.include_tasks: sysctl.yml
+  when: el10_baseline_sysctl_enabled | bool
+
+- name: Legacy/insecure service and package removal
+  ansible.builtin.include_tasks: services.yml
+  when: el10_baseline_services_enabled | bool
+
+- name: PAM password quality and account lockout
+  ansible.builtin.include_tasks: pam_password.yml
+  when: el10_baseline_pam_password_enabled | bool
+
+- name: Account aging / login.defs
+  ansible.builtin.include_tasks: login_defs.yml
+  when: el10_baseline_login_defs_enabled | bool
+
+- name: Sensitive file ownership and permissions
+  ansible.builtin.include_tasks: permissions.yml
+  when: el10_baseline_permissions_enabled | bool
+
+- name: cron/at access restriction
+  ansible.builtin.include_tasks: cron_at.yml
+  when: el10_baseline_cron_at_enabled | bool
+
+- name: Default umask
+  ansible.builtin.include_tasks: umask.yml
+  when: el10_baseline_umask_enabled | bool

@@ -1,0 +1,44 @@
+---
+# Package install and shared_preload_libraries/pgaudit.* GUCs are already
+# handled by tasks/repo.yml and the conf.d drop-in in tasks/config.yml —
+# this just runs CREATE EXTENSION, which needs a running server.
+
+- name: Check whether pgaudit is already enabled in template1
+  ansible.builtin.command: >
+    {{ postgresql_bin_dir }}/psql -tAc
+    "SELECT 1 FROM pg_extension WHERE extname='pgaudit'" template1
+  become_user: postgres
+  register: postgresql_pgaudit_template1_check
+  changed_when: false
+
+- name: Enable pgaudit in template1 (new databases inherit it automatically)
+  ansible.builtin.command: >
+    {{ postgresql_bin_dir }}/psql -c "CREATE EXTENSION IF NOT EXISTS pgaudit" template1
+  become_user: postgres
+  when: postgresql_pgaudit_template1_check.stdout | trim != '1'
+  changed_when: true
+
+- name: Check whether pgaudit is already enabled in the postgres database
+  ansible.builtin.command: >
+    {{ postgresql_bin_dir }}/psql -tAc
+    "SELECT 1 FROM pg_extension WHERE extname='pgaudit'" postgres
+  become_user: postgres
+  register: postgresql_pgaudit_postgres_check
+  changed_when: false
+
+- name: Enable pgaudit in the postgres database
+  ansible.builtin.command: >
+    {{ postgresql_bin_dir }}/psql -c "CREATE EXTENSION IF NOT EXISTS pgaudit" postgres
+  become_user: postgres
+  when: postgresql_pgaudit_postgres_check.stdout | trim != '1'
+  changed_when: true
+
+- name: Remind that pre-existing application databases need pgaudit enabled manually
+  ansible.builtin.debug:
+    msg: >-
+      pgaudit is enabled in template1 (new databases inherit it
+      automatically) and in the postgres maintenance database. Any
+      application database created BEFORE this role first ran on
+      {{ inventory_hostname }} does not retroactively get the extension —
+      run `CREATE EXTENSION IF NOT EXISTS pgaudit;` in each one yourself,
+      as a deliberate, tracked action.

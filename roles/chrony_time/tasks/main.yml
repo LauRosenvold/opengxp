@@ -1,0 +1,40 @@
+---
+- name: Ensure chrony is installed
+  ansible.builtin.dnf:
+    name: chrony
+    state: present
+
+- name: Deploy hardened chrony.conf
+  ansible.builtin.template:
+    src: chrony.conf.j2
+    dest: /etc/chrony.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart chronyd
+
+- name: Ensure chronyd is enabled and running
+  ansible.builtin.systemd:
+    name: chronyd
+    state: started
+    enabled: true
+
+- name: Flush handlers so the sync check below reflects the new config
+  ansible.builtin.meta: flush_handlers
+
+- name: Check time sync status
+  ansible.builtin.command: chronyc tracking
+  register: chrony_tracking
+  changed_when: false
+  failed_when: false
+
+- name: Warn if the clock is not currently synchronized
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: {{ inventory_hostname }}'s clock does not appear
+      synchronized yet ({{ chrony_tracking.stdout_lines | default([]) | join(' / ') }}).
+      This is often transient right after a config change — re-check with
+      `chronyc tracking` in a few minutes before treating it as a finding.
+  when: >-
+    chrony_tracking.rc != 0 or
+    'Leap status     : Not synchronised' in (chrony_tracking.stdout | default(''))

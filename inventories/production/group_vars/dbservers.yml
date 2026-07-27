@@ -1,0 +1,50 @@
+---
+# Runs server_roles/postgresql_server (see playbooks/postgresql_server.yml
+# — NOT part of playbooks/site.yml, same pattern as docker_hosts/k8s_nodes).
+# If you're actually running a different DB engine on some of these
+# hosts (Oracle 1521, SQL Server 1433, ...), postgresql_server isn't the
+# right role for them — this group_vars file assumes PostgreSQL.
+#
+# Zone-wide open within roles/firewalld_baseline's default-deny zone, not
+# source-restricted — same documented gap as docker_hosts/k8s_nodes (see
+# docs/SERVER_ROLES.md). Keep in sync with postgresql_port below if you
+# change it from the default.
+firewalld_rules:
+  - { port: "5432/tcp" }
+
+# --- Version -------------------------------------------------------------
+postgresql_version: "16"
+
+# --- Content source --------------------------------------------------------
+# Left at server_roles/postgresql_server's own CHANGEME defaults here on
+# purpose — fill in once PGDG is synced into Satellite (see
+# docs/SERVER_ROLES.md):
+# postgresql_repo_baseurl: "https://satellite.gxp.example.internal/pulp/repos/GxP-Enterprise/production/pgdg"
+# postgresql_repo_gpgkey: "https://satellite.gxp.example.internal/pub/RPM-GPG-KEY-PGDG"
+
+# --- Network access ----------------------------------------------------------
+# Empty by default — fail-closed (only local/loopback connections work
+# until this is populated). Add the real application-tier CIDR(s):
+postgresql_allowed_hosts: []
+#   - "10.20.10.0/24"   # CHANGEME — app tier subnet
+
+# --- TLS -----------------------------------------------------------------
+# Self-signed by default (see server_roles/postgresql_server/defaults).
+# Point these at a real CA-issued cert/key (local paths on the control
+# node) before this holds anything real:
+# postgresql_ssl_cert_src: "/path/on/control/node/db01.crt"
+# postgresql_ssl_key_src: "/path/on/control/node/db01.key"
+
+# --- Replication -----------------------------------------------------------
+# postgresql_role defaults to "standalone" — set per-host in host_vars
+# for an actual primary/replica pair, not here, since dbservers can hold
+# several unrelated PostgreSQL instances. Example host_vars for a replica:
+#   postgresql_role: replica
+#   postgresql_primary_host: db01.gxp.example.internal
+#   postgresql_replication_password: "{{ vault_postgresql_replication_password }}"
+
+# --- Backup ------------------------------------------------------------------
+# Off by default — see server_roles/postgresql_server/defaults/main.yml
+# and docs/SERVER_ROLES.md for why enabling this alone is not a backup
+# strategy.
+postgresql_wal_archiving_enabled: false

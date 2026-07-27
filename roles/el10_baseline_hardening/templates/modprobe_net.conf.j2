@@ -1,0 +1,5 @@
+# {{ ansible_managed | default('Managed by Ansible — el10_baseline_hardening') }}
+{% for mod in el10_baseline_disabled_net_modules %}
+install {{ mod }} /bin/false
+blacklist {{ mod }}
+{% endfor %}

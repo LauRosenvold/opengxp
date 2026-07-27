@@ -1,0 +1,10 @@
+{{ ansible_managed | default('Managed by Ansible — manual changes will be reverted.') }}
+
+  Host          : {{ inventory_hostname }}
+  Environment   : {{ environment_name | default('unknown') }}
+  GxP tier      : {{ gxp_tier | default('unspecified') }}
+  OS            : {{ ansible_distribution }} {{ ansible_distribution_version }}
+
+  Configuration changes to this system must go through the change-controlled
+  Ansible pipeline. See docs/CHANGE_CONTROL.md in the automation repository.
+

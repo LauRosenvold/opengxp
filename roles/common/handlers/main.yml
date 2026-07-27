@@ -1,0 +1,5 @@
+---
+# No handlers needed yet — hostname/timezone/locale/banner changes here
+# don't require a service restart. Kept as a placeholder so roles that
+# depend on `common` can safely `notify` into it later without a file
+# rename.

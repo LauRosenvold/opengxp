@@ -1,0 +1,31 @@
+---
+- name: Ensure the WAL archive directory exists
+  ansible.builtin.file:
+    path: "{{ postgresql_wal_archive_dir }}"
+    state: directory
+    owner: postgres
+    group: postgres
+    mode: "0700"
+  when: postgresql_wal_archiving_enabled | bool
+
+- name: Warn that WAL archiving is a mechanism, not a backup solution
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: postgresql_wal_archiving_enabled is true on
+      {{ inventory_hostname }}, copying WAL segments to a local directory
+      ({{ postgresql_wal_archive_dir }}). This is NOT an offsite backup,
+      has no retention policy, and gives you no restore tooling — point
+      archive_command (see templates/postgresql-hardening.conf.j2) at
+      pgBackRest/Barman/whatever your org standardizes on before relying
+      on this for anything real. See docs/SERVER_ROLES.md.
+  when: postgresql_wal_archiving_enabled | bool
+
+- name: Warn that WAL archiving is off (no PITR mechanism at all)
+  ansible.builtin.debug:
+    msg: >-
+      NOTE: postgresql_wal_archiving_enabled is false for
+      {{ inventory_hostname }} — no point-in-time-recovery mechanism, and
+      no backup at all beyond whatever you do completely outside this
+      role. This is an open item for your validation package if this
+      database holds GxP records — see docs/VALIDATION.md.
+  when: not (postgresql_wal_archiving_enabled | bool)

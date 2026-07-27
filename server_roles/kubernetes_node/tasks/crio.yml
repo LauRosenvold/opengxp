@@ -1,0 +1,62 @@
+---
+- name: Determine whether we're falling back to the public CRI-O repo
+  ansible.builtin.set_fact:
+    crio_using_public_repo: "{{ crio_repo_baseurl == 'CHANGEME' }}"
+
+- name: Warn when bypassing Satellite for CRI-O content
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: {{ inventory_hostname }} is using the public openSUSE
+      Build Service repo directly instead of a Satellite-managed content
+      view for CRI-O v{{ k8s_version }}. Fine for lab/evaluation — see
+      docs/SERVER_ROLES.md. Also double check that public URL is still
+      correct: CRI-O's packaging location has moved before.
+  when: crio_using_public_repo
+
+- name: Configure Satellite-hosted CRI-O repo
+  ansible.builtin.yum_repository:
+    name: "cri-o-v{{ k8s_version }}-satellite"
+    description: "CRI-O v{{ k8s_version }} (Satellite-managed content view)"
+    baseurl: "{{ crio_repo_baseurl }}"
+    gpgkey: "{{ crio_repo_gpgkey }}"
+    gpgcheck: true
+    enabled: true
+  when: not crio_using_public_repo
+
+- name: Configure public CRI-O repo (fallback only)
+  ansible.builtin.yum_repository:
+    name: "cri-o-v{{ k8s_version }}"
+    description: "CRI-O v{{ k8s_version }} (openSUSE Build Service)"
+    baseurl: "{{ crio_public_repo_baseurl }}"
+    gpgkey: "{{ crio_public_repo_gpgkey }}"
+    gpgcheck: true
+    enabled: true
+  when: crio_using_public_repo
+
+- name: Install CRI-O
+  ansible.builtin.dnf:
+    name: cri-o
+    state: present
+
+- name: Ensure /etc/crio/crio.conf.d exists
+  ansible.builtin.file:
+    path: /etc/crio/crio.conf.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Deploy hardened CRI-O config drop-in
+  ansible.builtin.template:
+    src: crio.conf.j2
+    dest: /etc/crio/crio.conf.d/10-ansible.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart crio
+
+- name: Ensure CRI-O is enabled and running
+  ansible.builtin.systemd:
+    name: crio
+    state: started
+    enabled: true

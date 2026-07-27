@@ -1,0 +1,14 @@
+---
+galaxy_info:
+  role_name: docker_host
+  description: >-
+    Turns a hardened RHEL9/RHEL10/AlmaLinux10 host into a generic Docker
+    workload host — CE install, hardened daemon.json, sysctl/audit/AIDE
+    integration, optional DOCKER-USER published-port restriction. Lives in
+    server_roles/, not roles/ — see docs/SERVER_ROLES.md.
+  license: Apache-2.0
+  min_ansible_version: "2.15"
+  platforms:
+    - name: EL
+      versions: ["9", "10"]
+dependencies: []

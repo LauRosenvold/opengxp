@@ -1,0 +1,13 @@
+# {{ ansible_managed | default('Managed by Ansible — server_roles/docker_host') }}
+## Docker-specific audit rules, independent of roles/auditd_gxp's gxp.rules.
+## Deliberately does NOT watch /var/lib/docker for writes (image layers and
+## container filesystems churn constantly — that would drown real signal
+## in noise). Watches config and binaries instead, plus who invoked the
+## `docker` CLI at all, since docker-group membership is root-equivalent.
+
+-w /usr/bin/dockerd -p x -k docker-daemon
+-w /usr/bin/docker -p x -k docker-cli
+-w /etc/docker/ -p wa -k docker-config
+-w /usr/lib/systemd/system/docker.service -p wa -k docker-config
+-w /usr/lib/systemd/system/docker.socket -p wa -k docker-config
+-w /etc/sysconfig/docker -p wa -k docker-config

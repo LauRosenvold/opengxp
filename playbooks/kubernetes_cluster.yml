@@ -1,0 +1,30 @@
+---
+# Workload-enablement playbook, not part of playbooks/site.yml — see
+# docs/SERVER_ROLES.md. Assumes hosts have already been through
+# playbooks/site.yml (or at least bootstrap.yml + hardening.yml).
+#
+# Deliberately ONE play covering both k8s_control_plane and k8s_workers,
+# and deliberately no `serial:` — server_roles/kubernetes_node's task
+# order relies on Ansible's linear strategy synchronizing every host at
+# each task boundary (prep everywhere, then init the first control-plane
+# node, then join everyone else). See tasks/main.yml's header comment in
+# that role for why splitting this into several plays or adding `serial`
+# would risk breaking that ordering.
+#
+# Usage:
+#   ansible-playbook playbooks/kubernetes_cluster.yml \
+#     -i inventories/staging/hosts.yml --check --diff
+#
+# (kubeadm init/join themselves don't have a meaningful --check mode —
+# --check will show you the repo/containerd/sysctl/audit-policy changes
+# accurately, but will report the kubeadm commands as "would run" without
+# being able to predict their outcome. Run for real against staging
+# before production, same as everything else in this repo.)
+
+- name: Configure a vanilla Kubernetes cluster
+  hosts: k8s_control_plane:k8s_workers
+  become: true
+
+  roles:
+    - role: kubernetes_node
+      tags: [kubernetes]

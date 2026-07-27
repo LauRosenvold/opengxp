@@ -1,0 +1,49 @@
+---
+- name: Deploy modprobe blacklist for unused filesystem modules
+  ansible.builtin.template:
+    src: modprobe_filesystems.conf.j2
+    dest: /etc/modprobe.d/cis-filesystems-blacklist.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Rebuild initramfs
+
+- name: Check whether /tmp is a separate mount
+  ansible.builtin.command: findmnt -kn /tmp
+  register: el10_baseline_tmp_mount
+  changed_when: false
+  failed_when: false
+
+- name: Warn if /tmp is not a separate partition (CIS 1.1.2.x)
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: /tmp is not on its own mount point on
+      {{ inventory_hostname }}. This is a partitioning decision made at
+      OS install/kickstart time — Ansible cannot safely repartition a live
+      root filesystem. Fix in the kickstart/image template for future
+      builds and track existing hosts as a documented, risk-accepted
+      finding in the compliance_scan.yml evidence until reimaged.
+  when: el10_baseline_tmp_mount.rc != 0
+
+- name: Check /tmp mount options include noexec,nosuid,nodev
+  ansible.builtin.command: findmnt -kn -o OPTIONS /tmp
+  register: el10_baseline_tmp_opts
+  changed_when: false
+  failed_when: false
+  when: el10_baseline_tmp_mount.rc == 0
+
+- name: Warn if /tmp is missing recommended mount options
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: /tmp on {{ inventory_hostname }} is missing one or more of
+      noexec/nosuid/nodev ({{ el10_baseline_tmp_opts.stdout | default('') }}).
+      Update /etc/fstab and remount; not done automatically here because a
+      live remount of /tmp can disrupt running processes with open files
+      there — schedule it as a change-controlled maintenance action.
+  when:
+    - el10_baseline_tmp_mount.rc == 0
+    - el10_baseline_tmp_opts is defined
+    - >-
+      not ('noexec' in el10_baseline_tmp_opts.stdout
+      and 'nosuid' in el10_baseline_tmp_opts.stdout
+      and 'nodev' in el10_baseline_tmp_opts.stdout)

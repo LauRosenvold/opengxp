@@ -1,0 +1,35 @@
+---
+# Applies to any host running server_roles/docker_host, regardless of
+# which OS group (rhel9/rhel10/almalinux10) it's also in. See
+# docs/SERVER_ROLES.md for why this is a separate workload-enablement
+# layer from the roles/ compliance baseline.
+
+# --- Undo the fleet-wide "no IP forwarding" baseline for these hosts only ----
+# RHEL10 / AlmaLinux10 (roles/el10_baseline_hardening):
+el10_baseline_ip_forward_enabled: true
+
+# RHEL9 (ansible-lockdown.RHEL9-CIS) — best-effort per-control override,
+# matching the pattern already used in rhel9.yml's rhel9cis_rule_5_4_1_1
+# example. Control numbering for "ensure IP forwarding is disabled" has
+# historically been 3.1.1 in the CIS RHEL Benchmark, but VERIFY the exact
+# var name against the installed ansible-lockdown.RHEL9-CIS version before
+# relying on it — if it doesn't match, server_roles/docker_host's own
+# sysctl task still forces net.ipv4.ip_forward back to 1 on every run, so
+# a docker_hosts x rhel9 host isn't actually broken either way, just
+# fighting itself until this is confirmed and corrected.
+rhel9cis_rule_3_1_1: false
+
+# --- Docker CE content source --------------------------------------------
+# Left at server_roles/docker_host's own CHANGEME default here on purpose
+# — fill in once Docker CE is synced into a Satellite custom product (see
+# docs/SERVER_ROLES.md):
+# docker_repo_baseurl: "https://satellite.gxp.example.internal/pulp/repos/GxP-Enterprise/production/docker-ce"
+# docker_repo_gpgkey: "https://satellite.gxp.example.internal/pub/RPM-GPG-KEY-docker"
+
+# --- Published-port firewall restriction ----------------------------------
+# Off by default (see server_roles/docker_host/defaults/main.yml) — the
+# role warns loudly every run until this is addressed. Populate once you
+# know which networks should reach this host's containers:
+# docker_restrict_published_ports: true
+# docker_allowed_source_cidrs:
+#   - "10.20.0.0/16"   # CHANGEME

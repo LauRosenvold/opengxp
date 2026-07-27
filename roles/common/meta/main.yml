@@ -1,0 +1,19 @@
+---
+galaxy_info:
+  role_name: common
+  description: Baseline OS configuration (hostname, timezone, locale, banners, base packages) for RHEL 9/10 GxP estate
+  company: GxP Enterprise
+  license: Apache-2.0
+  min_ansible_version: "2.15"
+  platforms:
+    - name: EL
+      versions:
+        - "9"
+        - "10"
+
+dependencies: []
+# No automatic role dependencies anywhere in this repo — every playbook
+# lists roles explicitly, in the order that matters (see
+# playbooks/hardening.yml). Implicit meta/main.yml dependency chains make
+# execution order hard to audit, which matters more here than the
+# convenience of not having to list roles by hand.

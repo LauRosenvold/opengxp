@@ -1,0 +1,70 @@
+---
+- name: Note that Satellite registration is skipped for this host's group
+  ansible.builtin.debug:
+    msg: >-
+      satellite_registration_enabled is false for {{ inventory_hostname }}
+      — skipping subscription-manager/Satellite registration entirely.
+      Ensure this host's repos are managed some other way (see the note
+      in roles/satellite_registration/defaults/main.yml) before relying on
+      roles/patch_management against it.
+  when: not (satellite_registration_enabled | bool)
+
+- name: Register this host to Red Hat Satellite
+  when: satellite_registration_enabled | bool
+  block:
+    - name: Fail loudly if no activation key was supplied
+      ansible.builtin.assert:
+        that:
+          - satellite_activation_key is defined
+          - satellite_activation_key | length > 0
+        fail_msg: >-
+          satellite_activation_key is empty. Supply it via an ansible-vault
+          encrypted inventories/<env>/group_vars/all.vault.yml — do not put it
+          here in plaintext.
+
+    - name: Check current subscription-manager registration state
+      ansible.builtin.command: subscription-manager identity
+      register: sm_identity
+      changed_when: false
+      failed_when: false
+
+    - name: Determine if (re)registration is required
+      ansible.builtin.set_fact:
+        satellite_registration_needed: >-
+          {{ sm_identity.rc != 0 or satellite_force_reregister | bool }}
+
+    - name: Install the Satellite consumer CA/config RPM
+      ansible.builtin.dnf:
+        name: "https://{{ satellite_server }}/pub/katello-ca-consumer-latest.noarch.rpm"
+        state: present
+        disable_gpg_check: true
+      when: satellite_registration_needed
+
+    - name: Unregister existing subscription before forced re-registration
+      ansible.builtin.command: subscription-manager unregister
+      when:
+        - satellite_registration_needed
+        - satellite_force_reregister | bool
+        - sm_identity.rc == 0
+      changed_when: true
+
+    - name: Register host to Satellite via activation key
+      ansible.builtin.command: >
+        subscription-manager register
+        --org={{ satellite_organization }}
+        --activationkey={{ satellite_activation_key }}
+        --force
+      when: satellite_registration_needed
+      changed_when: true
+      no_log: true   # the command line contains the activation key
+
+    - name: Verify registration succeeded
+      ansible.builtin.command: subscription-manager identity
+      register: sm_identity_post
+      changed_when: false
+      failed_when: sm_identity_post.rc != 0
+
+    - name: Refresh subscription-manager repo/content metadata
+      ansible.builtin.command: subscription-manager refresh
+      changed_when: true
+      when: satellite_registration_needed

@@ -1,0 +1,16 @@
+---
+galaxy_info:
+  role_name: netbox
+  description: >-
+    NetBox (netbox-community-style Docker Compose stack) deployed on top
+    of an already-provisioned server_roles/docker_host. TLS-terminating
+    nginx reverse proxy, external PostgreSQL recommended (via
+    server_roles/postgresql_server) with a containerized fallback for
+    lab/evaluation, containerized Redis for cache/task queue. Lives in
+    apps/, a third tier below server_roles/ — see docs/APPS.md.
+  license: Apache-2.0
+  min_ansible_version: "2.15"
+  platforms:
+    - name: EL
+      versions: ["9", "10"]
+dependencies: []

@@ -1,0 +1,18 @@
+---
+- name: Set default umask in /etc/profile
+  ansible.builtin.lineinfile:
+    path: /etc/profile
+    regexp: "^\\s*umask\\s+"
+    line: "umask {{ el10_baseline_default_umask }}"
+
+- name: Set default umask in /etc/bashrc
+  ansible.builtin.lineinfile:
+    path: /etc/bashrc
+    regexp: "^\\s*umask\\s+"
+    line: "umask {{ el10_baseline_default_umask }}"
+
+- name: Set default umask for systemd-spawned services (login.defs UMASK)
+  ansible.builtin.lineinfile:
+    path: /etc/login.defs
+    regexp: "^#?\\s*UMASK\\s+"
+    line: "UMASK\t{{ el10_baseline_default_umask }}"

@@ -1,0 +1,37 @@
+---
+# roles/el10_baseline_hardening (RHEL10/AlmaLinux10) and
+# ansible-lockdown.RHEL9-CIS (rhel9) both disable IP forwarding fleet-wide
+# by default — Docker cannot function without it. This re-asserts it
+# unconditionally rather than only relying on
+# inventories/<env>/group_vars/docker_hosts.yml's
+# el10_baseline_ip_forward_enabled override, so a host is never silently
+# half-configured if this role runs without that group_vars file having
+# been applied first. See docs/SERVER_ROLES.md for the caveat that a
+# later hardening.yml re-run on rhel9 (whose CIS role we don't control the
+# internals of) could flip this back — if that happens, re-running this
+# playbook fixes it again.
+- name: Enable IP forwarding (required for Docker networking)
+  ansible.posix.sysctl:
+    name: net.ipv4.ip_forward
+    value: "{{ '1' if docker_enable_ip_forward | bool else '0' }}"
+    sysctl_file: /etc/sysctl.d/90-docker.conf
+    state: present
+    reload: true
+
+- name: Ensure the bridge netfilter kernel module is loaded
+  community.general.modprobe:
+    name: br_netfilter
+    state: present
+  when: docker_enable_ip_forward | bool
+
+- name: Enable bridge-netfilter iptables sysctls (needed for container network isolation)
+  ansible.posix.sysctl:
+    name: "{{ item }}"
+    value: "1"
+    sysctl_file: /etc/sysctl.d/90-docker.conf
+    state: present
+    reload: true
+  loop:
+    - net.bridge.bridge-nf-call-iptables
+    - net.bridge.bridge-nf-call-ip6tables
+  when: docker_enable_ip_forward | bool

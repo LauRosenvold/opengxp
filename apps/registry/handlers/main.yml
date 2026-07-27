@@ -1,0 +1,11 @@
+---
+- name: Restart registry
+  ansible.builtin.command: >
+    docker compose -f {{ registry_app_dir }}/docker-compose.yml restart registry
+  args:
+    chdir: "{{ registry_app_dir }}"
+  changed_when: true
+  # config.yml, the htpasswd file, and the TLS cert/key are all
+  # bind-mounted file content — invisible to `docker compose up -d`'s own
+  # config-drift detection, same reasoning as apps/netbox's nginx
+  # restart handler.

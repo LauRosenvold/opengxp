@@ -1,0 +1,7 @@
+---
+# Set per-OS in inventories/<env>/group_vars/rhel9.yml, rhel10.yml, and
+# almalinux10.yml — do not override here. Defaults exist only so
+# `ansible-lint`/molecule don't choke on an undefined var when this role
+# is linted in isolation.
+cis_hardening_engine: "lockdown_role"
+cis_hardening_role_name: "ansible-lockdown.RHEL9-CIS"

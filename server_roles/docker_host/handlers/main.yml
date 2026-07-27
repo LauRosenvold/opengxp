@@ -1,0 +1,25 @@
+---
+- name: Restart docker
+  ansible.builtin.systemd:
+    name: docker
+    state: restarted
+    daemon_reload: true
+
+- name: Reload systemd
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: Load docker audit rules
+  ansible.builtin.command: augenrules --load
+  register: docker_audit_load_result
+  changed_when: "'no change' not in (docker_audit_load_result.stdout | default(''))"
+  failed_when:
+    - docker_audit_load_result.rc != 0
+    - "'immutable' not in (docker_audit_load_result.stderr | default(''))"
+  # Same immutable-mode tolerance as roles/auditd_gxp's handler — if
+  # -e 2 is already active from a previous boot, this fails with an
+  # "immutable" error and the new rules just wait for the next reboot.
+
+- name: Reapply DOCKER-USER firewall rules
+  ansible.builtin.command: /usr/local/sbin/docker-user-firewall.sh
+  changed_when: true

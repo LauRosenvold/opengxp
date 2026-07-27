@@ -1,0 +1,26 @@
+# {{ ansible_managed | default('Managed by Ansible — server_roles/kubernetes_node') }}
+# Drop-in under /etc/crio/crio.conf.d/ — merged over the packaged
+# defaults rather than replacing /etc/crio/crio.conf wholesale, so a
+# CRI-O package upgrade never silently reverts (or conflicts with) this.
+
+[crio.runtime]
+# MUST match the kubelet's cgroup driver — see the note next to
+# crio_cgroup_manager in defaults/main.yml.
+cgroup_manager = "{{ crio_cgroup_manager }}"
+
+# container-selinux provides proper labeling — CRI-O has particularly
+# mature SELinux support (it's what OpenShift itself runs), and this
+# stays enabled for the same reason roles/selinux_enforce keeps SELinux
+# enforcing fleet-wide: see docs/SERVER_ROLES.md.
+selinux = true
+
+log_level = "{{ crio_log_level }}"
+
+[crio.image]
+pause_image = "{{ k8s_pause_image }}"
+
+[crio.network]
+network_dir = "/etc/cni/net.d/"
+plugin_dirs = [
+  "/opt/cni/bin/",
+]

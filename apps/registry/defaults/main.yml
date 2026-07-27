@@ -1,0 +1,101 @@
+---
+# A private Docker/OCI registry (distribution/distribution, the
+# `registry:2` image — same lineage Docker Hub itself runs on) deployed
+# on top of an already-provisioned server_roles/docker_host. This is
+# application deployment, not platform enablement — see docs/APPS.md.
+# Runs against the `registry_hosts` inventory group; every host in it
+# should also be in `docker_hosts`.
+#
+# The obvious next step once this is running: point the CHANGEME
+# registry-mirror/image-source vars in server_roles/docker_host,
+# server_roles/kubernetes_node, and apps/netbox at it instead of
+# docker.io directly — see docs/APPS.md's cross-reference section.
+
+# --- Image ------------------------------------------------------------------------
+# Pinned deliberately, bump deliberately — same convention as every other
+# pinned image/manifest in this repo. The distribution project has a
+# newer v3 line (CNCF `distribution/distribution`); this pins the
+# long-established, widely-deployed 2.8.x line for stability. Revisit
+# once you've evaluated v3 for your estate.
+registry_image: "docker.io/library/registry:2.8.3"
+
+# Optional web UI for browsing repository contents — off is a
+# perfectly reasonable choice if `docker`/`skopeo`/`crane` CLI is enough
+# for your operators. joxit/docker-registry-ui is a thin, read-mostly
+# frontend; it doesn't affect push/pull auth or storage.
+registry_ui_enabled: true
+registry_ui_image: "docker.io/joxit/docker-registry-ui:2.5.7"
+# Loopback-only by default — browsing the catalog isn't push/pull-auth
+# gated the same way (the UI proxies through to the registry, which
+# still enforces htpasswd auth for the actual API calls), but exposing
+# an unauthenticated-by-default web UI fleet-wide isn't a great default
+# either. Set to "0.0.0.0" (and open registry_ui_port in
+# group_vars/registry_hosts.yml's firewalld_rules) if you want it
+# reachable beyond this host itself.
+registry_ui_bind_address: "127.0.0.1"
+registry_ui_port: 8080
+
+# --- Hostname / networking -----------------------------------------------------
+# What clients will actually pull from — `docker pull
+# {{ registry_hostname }}/myimage` — so it has to match the TLS cert's
+# CN/SAN and what you tell other hosts to trust (see
+# server_roles/docker_host's docker_trusted_registry_cas). No sane
+# default exists; this fails loudly if left as CHANGEME (see
+# tasks/secrets.yml).
+registry_hostname: "CHANGEME"   # e.g. registry.gxp.example.internal
+registry_https_port: 443
+
+# --- Filesystem layout -----------------------------------------------------------
+registry_app_dir: /opt/registry
+registry_data_dir: "{{ registry_app_dir }}/data"
+registry_storage_dir: "{{ registry_data_dir }}/storage"   # bind-mounted, not a named Docker volume — same "auditable host path" posture as apps/netbox
+registry_tls_dir: "{{ registry_app_dir }}/tls"
+
+# UID the registry/registry-ui container images run their main process
+# as. 1000 matches the current pinned image tags above (registry:2.8.x
+# runs as a non-root user); verify with `docker run --rm <image> id` if
+# you bump either tag.
+registry_container_uid: "1000"
+
+# --- Storage backend ---------------------------------------------------------------
+# Filesystem is the only backend this role actually wires up — a real
+# bind-mounted directory, easy to reason about and back up directly.
+# distribution/distribution also supports S3/Azure/GCS drivers; adding
+# one is a documented gap (different config schema, credentials,
+# lifecycle policy considerations this role doesn't attempt to cover) —
+# see docs/APPS.md.
+registry_storage_driver: filesystem
+
+# --- TLS -----------------------------------------------------------------------
+# The registry binary terminates TLS itself here — unlike apps/netbox,
+# which needed an nginx sidecar because NetBox's own bundled server
+# doesn't do TLS. distribution/distribution has native, simple TLS config
+# (http.tls.certificate/key below), so there's no reverse proxy in this
+# stack at all. Same self-signed-default/real-cert-pluggable pattern as
+# apps/netbox and server_roles/postgresql_server otherwise.
+registry_ssl_cert_src: ""
+registry_ssl_key_src: ""
+registry_ssl_self_signed_days: 825
+
+# --- Authentication ---------------------------------------------------------------
+# htpasswd (bcrypt) basic auth — the simplest option distribution/
+# distribution supports natively, no separate token-auth server to run.
+# Every push AND pull requires a login; there is no anonymous access.
+# Empty fails the run loudly (see tasks/secrets.yml) rather than standing
+# up an unauthenticated image store.
+registry_users: []
+# Example (password is vaulted, never plaintext in a real inventory):
+#   - { username: "ci-pipeline", password: "{{ vault_registry_ci_password }}" }
+#   - { username: "svc_ansible_pull", password: "{{ vault_registry_pull_password }}" }
+
+# --- Deletion / garbage collection --------------------------------------------------
+# Off by default: once an image digest is pushed, it stays — a
+# deliberate, GxP-flavored default, since a validated deployment or a
+# past compliance_scan.yml evidence artifact might reference a specific
+# image digest that should never quietly disappear. Turn this on only if
+# your org has a documented image retention policy that says otherwise.
+registry_delete_enabled: false
+# Only meaningful when registry_delete_enabled is true — deleting a tag
+# just unlinks it; the underlying blobs still consume disk until garbage
+# collection runs. Weekly, off-hours, by default.
+registry_gc_cron: "0 3 * * 0"

@@ -1,0 +1,41 @@
+---
+- name: Ensure /etc/docker exists
+  ansible.builtin.file:
+    path: /etc/docker
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Deploy hardened daemon.json
+  ansible.builtin.template:
+    src: daemon.json.j2
+    dest: /etc/docker/daemon.json
+    owner: root
+    group: root
+    mode: "0644"
+    validate: "python3 -m json.tool %s"
+  notify: Restart docker
+
+- name: Enable Docker Content Trust system-wide
+  ansible.builtin.lineinfile:
+    path: /etc/environment
+    regexp: "^DOCKER_CONTENT_TRUST="
+    line: "DOCKER_CONTENT_TRUST=1"
+  when: docker_content_trust_enabled | bool
+
+- name: Remove Docker Content Trust setting if disabled
+  ansible.builtin.lineinfile:
+    path: /etc/environment
+    regexp: "^DOCKER_CONTENT_TRUST="
+    state: absent
+  when: not (docker_content_trust_enabled | bool)
+
+- name: Ensure containerd and docker are enabled and running
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    state: started
+    enabled: true
+  loop:
+    - containerd
+    - docker

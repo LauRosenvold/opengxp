@@ -1,0 +1,59 @@
+# {{ ansible_managed | default('Managed by Ansible — server_roles/postgresql_server') }}
+# Loaded via include_dir = 'conf.d' in postgresql.conf — see
+# tasks/config.yml. Settings here override the packaged postgresql.conf
+# defaults without editing that file directly.
+
+listen_addresses = '{{ postgresql_listen_addresses }}'
+port = {{ postgresql_port }}
+max_connections = {{ postgresql_max_connections }}
+shared_buffers = '{{ postgresql_shared_buffers }}'
+effective_cache_size = '{{ postgresql_effective_cache_size }}'
+
+password_encryption = scram-sha-256
+
+{% if postgresql_ssl_enabled %}
+ssl = on
+ssl_cert_file = '/etc/pgsql/tls/server.crt'
+ssl_key_file = '/etc/pgsql/tls/server.key'
+ssl_min_protocol_version = 'TLSv1.2'
+{% else %}
+ssl = off
+{% endif %}
+
+log_destination = 'stderr'
+logging_collector = on
+log_connections = {{ 'on' if postgresql_log_connections else 'off' }}
+log_disconnections = {{ 'on' if postgresql_log_disconnections else 'off' }}
+log_min_duration_statement = {{ postgresql_log_min_duration_statement_ms }}
+log_line_prefix = '{{ postgresql_log_line_prefix }}'
+
+{% if postgresql_pgaudit_enabled %}
+# pgAudit — GxP SQL-level audit trail. Requires a restart (not just
+# reload) whenever shared_preload_libraries changes, which is why
+# tasks/config.yml always notifies a restart on this file, not a reload.
+shared_preload_libraries = 'pgaudit'
+pgaudit.log = '{{ postgresql_pgaudit_log_classes }}'
+pgaudit.log_catalog = {{ 'on' if postgresql_pgaudit_log_catalog else 'off' }}
+pgaudit.log_parameter = {{ 'on' if postgresql_pgaudit_log_parameter else 'off' }}
+pgaudit.log_relation = {{ 'on' if postgresql_pgaudit_log_relation else 'off' }}
+pgaudit.log_statement_once = {{ 'on' if postgresql_pgaudit_log_statement_once else 'off' }}
+{% endif %}
+
+{% if postgresql_role == 'primary' %}
+# Needed so replicas (and pg_basebackup) can stream from this primary.
+wal_level = replica
+max_wal_senders = 10
+max_replication_slots = 10
+{% endif %}
+
+{% if postgresql_role == 'replica' %}
+hot_standby = on
+{% endif %}
+
+{% if postgresql_wal_archiving_enabled %}
+# Mechanism only, not a backup solution — see defaults/main.yml and
+# docs/SERVER_ROLES.md. Replace archive_command with your real backup
+# tool's command once you have one.
+archive_mode = on
+archive_command = 'test ! -f {{ postgresql_wal_archive_dir }}/%f && cp %p {{ postgresql_wal_archive_dir }}/%f'
+{% endif %}

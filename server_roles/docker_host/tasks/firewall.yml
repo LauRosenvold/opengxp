@@ -1,0 +1,77 @@
+---
+- name: Warn that published container ports bypass firewalld unless restricted
+  ansible.builtin.debug:
+    msg: >-
+      NOTE: docker_restrict_published_ports is false for
+      {{ inventory_hostname }}. Docker inserts its own ACCEPT rules ahead
+      of firewalld's zone rules (via the DOCKER-USER chain) for any
+      published container port — roles/firewalld_baseline's default-deny
+      zone does NOT protect them. Any `-p <port>:<port>` a container
+      publishes is reachable from anywhere network-wise reaches this host,
+      regardless of firewalld config. Set docker_restrict_published_ports:
+      true and docker_allowed_source_cidrs in
+      inventories/<env>/group_vars/docker_hosts.yml once you know which
+      networks should legitimately reach this host's containers.
+  when: not (docker_restrict_published_ports | bool)
+
+- name: DOCKER-USER inbound restriction
+  when: docker_restrict_published_ports | bool
+  block:
+    - name: Fail loudly if enabling the restriction with an empty allow-list
+      ansible.builtin.assert:
+        that:
+          - docker_allowed_source_cidrs | length > 0
+        fail_msg: >-
+          docker_restrict_published_ports is true but
+          docker_allowed_source_cidrs is empty. That would fail-closed —
+          every published container port unreachable from anywhere,
+          including legitimate traffic. Populate the CIDR list or leave
+          the restriction disabled.
+
+    - name: Deploy the DOCKER-USER restriction script
+      ansible.builtin.template:
+        src: docker-user-firewall.sh.j2
+        dest: /usr/local/sbin/docker-user-firewall.sh
+        owner: root
+        group: root
+        mode: "0750"
+      notify: Reapply DOCKER-USER firewall rules
+
+    - name: Ensure the docker.service systemd drop-in directory exists
+      ansible.builtin.file:
+        path: /etc/systemd/system/docker.service.d
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Deploy the systemd drop-in that reapplies rules after every docker start
+      ansible.builtin.template:
+        src: docker_service_dropin.conf.j2
+        dest: /etc/systemd/system/docker.service.d/10-docker-user-firewall.conf
+        owner: root
+        group: root
+        mode: "0644"
+      notify:
+        - Reload systemd
+        - Restart docker
+
+    - name: Apply the DOCKER-USER rules now (covers docker already being up)
+      ansible.builtin.command: /usr/local/sbin/docker-user-firewall.sh
+      changed_when: true
+
+- name: Remove DOCKER-USER restriction artifacts if disabled
+  when: not (docker_restrict_published_ports | bool)
+  block:
+    - name: Remove the systemd drop-in
+      ansible.builtin.file:
+        path: /etc/systemd/system/docker.service.d/10-docker-user-firewall.conf
+        state: absent
+      notify:
+        - Reload systemd
+        - Restart docker
+
+    - name: Remove the restriction script
+      ansible.builtin.file:
+        path: /usr/local/sbin/docker-user-firewall.sh
+        state: absent

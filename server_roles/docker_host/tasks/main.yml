@@ -1,0 +1,24 @@
+---
+- name: Configure Docker CE package repository
+  ansible.builtin.include_tasks: repo.yml
+
+- name: Configure networking prerequisites
+  ansible.builtin.include_tasks: sysctl.yml
+
+- name: Configure the Docker daemon
+  ansible.builtin.include_tasks: daemon.yml
+
+- name: Configure trusted private registry CAs
+  ansible.builtin.include_tasks: trusted_registries.yml
+  when: docker_trusted_registry_cas | length > 0
+
+- name: Configure Docker-specific audit rules
+  ansible.builtin.include_tasks: audit.yml
+  when: docker_audit_rules_enabled | bool
+
+- name: Configure Docker-specific AIDE rules
+  ansible.builtin.include_tasks: aide.yml
+  when: docker_aide_watch_enabled | bool
+
+- name: Configure published-port firewall restriction
+  ansible.builtin.include_tasks: firewall.yml

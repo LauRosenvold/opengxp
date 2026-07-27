@@ -1,0 +1,30 @@
+---
+# Controlled patch window playbook. Deliberately NOT part of site.yml —
+# patching has its own cadence/approval process (see
+# inventories/<env>/group_vars/gxp_critical.yml vs gxp_standard.yml for
+# per-tier scheduling, and docs/CHANGE_CONTROL.md for the ticket
+# requirement enforced inside roles/patch_management itself).
+#
+# Usage:
+#   ansible-playbook playbooks/patch_management.yml \
+#     -i inventories/production/hosts.yml \
+#     -e change_ticket=CR-12345 \
+#     --limit gxp_standard
+#
+# `serial` here is intentionally small — patching restarts services and
+# sometimes reboots hosts; never do that to a large slice of the fleet at
+# once regardless of tier.
+
+- name: Apply patches within a controlled maintenance window
+  # !hyperv_hosts: dnf-based patching doesn't apply to that (Windows,
+  # WinRM-connected) group — patch the hypervisor host itself via your
+  # normal Windows Update process. !localhost: the Ansible control node
+  # itself. See docs/PROVISIONING.md.
+  hosts: all:!hyperv_hosts:!localhost
+  become: true
+  serial: 1
+  max_fail_percentage: 0
+
+  roles:
+    - role: patch_management
+      tags: [patch]

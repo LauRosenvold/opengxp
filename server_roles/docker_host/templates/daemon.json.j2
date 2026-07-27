@@ -1,0 +1,28 @@
+{# {{ ansible_managed | default('Managed by Ansible — server_roles/docker_host') }} #}
+{% set config = {
+  'selinux-enabled': docker_daemon_selinux_enabled,
+  'live-restore': docker_daemon_live_restore,
+  'icc': docker_daemon_icc,
+  'userland-proxy': docker_daemon_userland_proxy,
+  'no-new-privileges': docker_daemon_no_new_privileges,
+  'storage-driver': docker_daemon_storage_driver,
+  'log-driver': docker_daemon_log_driver,
+  'log-opts': {'tag': '{{.Name}}/{{.ID}}'},
+  'default-ulimits': {
+    'nofile': {
+      'Name': 'nofile',
+      'Soft': docker_daemon_default_ulimit_nofile_soft,
+      'Hard': docker_daemon_default_ulimit_nofile_hard
+    }
+  }
+} %}
+{% if docker_daemon_userns_remap | length > 0 %}
+{% set _ = config.update({'userns-remap': docker_daemon_userns_remap}) %}
+{% endif %}
+{% if docker_registry_mirrors | length > 0 %}
+{% set _ = config.update({'registry-mirrors': docker_registry_mirrors}) %}
+{% endif %}
+{% if docker_insecure_registries | length > 0 %}
+{% set _ = config.update({'insecure-registries': docker_insecure_registries}) %}
+{% endif %}
+{{ config | to_nice_json }}

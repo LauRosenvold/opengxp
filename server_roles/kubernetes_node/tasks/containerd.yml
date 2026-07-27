@@ -1,0 +1,59 @@
+---
+- name: Determine whether we're falling back to the public containerd repo
+  ansible.builtin.set_fact:
+    containerd_using_public_repo: "{{ containerd_repo_baseurl == 'CHANGEME' }}"
+
+- name: Warn when bypassing Satellite for containerd content
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: {{ inventory_hostname }} is using download.docker.com
+      directly instead of a Satellite-managed content view for
+      containerd. Fine for lab/evaluation — see docs/SERVER_ROLES.md.
+  when: containerd_using_public_repo
+
+- name: Configure Satellite-hosted containerd repo
+  ansible.builtin.yum_repository:
+    name: containerd-satellite
+    description: "containerd.io (Satellite-managed content view)"
+    baseurl: "{{ containerd_repo_baseurl }}"
+    gpgkey: "{{ containerd_repo_gpgkey }}"
+    gpgcheck: true
+    enabled: true
+  when: not containerd_using_public_repo
+
+- name: Install containerd's public repo definition (fallback only)
+  ansible.builtin.get_url:
+    url: >-
+      {{ containerd_public_repo_url_by_distro[ansible_distribution]
+         | default(containerd_public_repo_url_by_distro['RedHat']) }}
+    dest: /etc/yum.repos.d/docker-ce.repo
+    mode: "0644"
+  when: containerd_using_public_repo
+
+- name: Install containerd
+  ansible.builtin.dnf:
+    name: containerd.io
+    state: present
+
+- name: Ensure /etc/containerd exists
+  ansible.builtin.file:
+    path: /etc/containerd
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Deploy hardened containerd config
+  ansible.builtin.template:
+    src: containerd_config.toml.j2
+    dest: /etc/containerd/config.toml
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart containerd
+
+- name: Ensure containerd is enabled and running
+  ansible.builtin.systemd:
+    name: containerd
+    state: started
+    enabled: true

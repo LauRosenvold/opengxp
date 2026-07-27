@@ -1,0 +1,106 @@
+---
+- name: Ensure sudo is installed
+  ansible.builtin.dnf:
+    name: sudo
+    state: present
+
+- name: Ensure the sudo I/O log directory exists
+  ansible.builtin.file:
+    path: "{{ user_access_sudo_iolog_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  when: user_access_sudo_log_output | bool
+
+- name: Deploy sudo session-logging defaults
+  ansible.builtin.template:
+    src: sudoers_logging.j2
+    dest: /etc/sudoers.d/00-gxp-logging
+    owner: root
+    group: root
+    mode: "0440"
+    validate: "visudo -cf %s"
+
+- name: Create local segregation-of-duties groups
+  ansible.builtin.group:
+    name: "{{ item.name }}"
+    state: present
+  loop: "{{ user_access_sod_groups }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: item.source | default('local') == 'local'
+  # Directory-sourced (source: directory) entries are AD security groups
+  # resolved via roles/identity_sssd — creating a same-named local group
+  # here would shadow/conflict with that resolution instead of using it.
+
+- name: Deploy per-group sudoers command restrictions
+  ansible.builtin.template:
+    src: sudoers_sod_group.j2
+    dest: "/etc/sudoers.d/10-gxp-{{ item.name }}"
+    owner: root
+    group: root
+    mode: "0440"
+    validate: "visudo -cf %s"
+  vars:
+    group: "{{ item }}"
+  loop: "{{ user_access_sod_groups }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Verify directory-sourced sudo groups actually resolve via SSSD
+  ansible.builtin.command: "getent group {{ item.name }}"
+  register: user_access_directory_group_check
+  changed_when: false
+  failed_when: false
+  loop: "{{ user_access_sod_groups | selectattr('source', 'defined') | selectattr('source', 'equalto', 'directory') | list }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Warn about any directory-sourced sudo group that didn't resolve
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: sudo group {{ item.item.name }} did not resolve via
+      `getent group` on {{ inventory_hostname }} — the sudoers.d entry
+      for it was still deployed (sudo itself doesn't validate group
+      existence at deploy time), but it's dead until this resolves.
+      Check roles/identity_sssd's join status and
+      identity_use_fully_qualified_names.
+  loop: "{{ user_access_directory_group_check.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  when: item.rc != 0
+
+- name: Create break-glass emergency accounts
+  ansible.builtin.user:
+    name: "{{ item.name }}"
+    uid: "{{ item.uid }}"
+    groups: "{{ item.group }}"
+    shell: /bin/bash
+    password: "!!"          # locked — no password login possible
+    password_lock: true
+    create_home: true
+  loop: "{{ user_access_break_glass_accounts }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Install SSH authorized key for break-glass accounts, if provided
+  ansible.posix.authorized_key:
+    user: "{{ item.name }}"
+    key: "{{ item.ssh_authorized_key }}"
+    state: present
+  loop: "{{ user_access_break_glass_accounts }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: item.ssh_authorized_key | default('') | length > 0
+
+- name: Remind that break-glass accounts stay locked until an emergency procedure unlocks them
+  ansible.builtin.debug:
+    msg: >-
+      {{ item.name }} exists on {{ inventory_hostname }} but its password
+      is locked. Unlocking it for an actual emergency is a manual, logged,
+      ticketed action outside this Ansible run — see your break-glass
+      access runbook, not this playbook.
+  loop: "{{ user_access_break_glass_accounts }}"
+  loop_control:
+    label: "{{ item.name }}"

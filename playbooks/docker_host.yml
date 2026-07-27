@@ -1,0 +1,23 @@
+---
+# Workload-enablement playbook, not part of playbooks/site.yml — see
+# docs/SERVER_ROLES.md for why this layer is kept separate from the
+# roles/ compliance baseline and its change-control process.
+#
+# Assumes a host has already been through playbooks/site.yml (or at least
+# playbooks/bootstrap.yml + playbooks/hardening.yml) — this playbook only
+# adds Docker on top of an already-hardened host, it doesn't stand one up
+# from scratch.
+#
+# Usage:
+#   ansible-playbook playbooks/docker_host.yml \
+#     -i inventories/staging/hosts.yml --limit docker_hosts --check --diff
+
+- name: Configure Docker workload hosts
+  hosts: docker_hosts
+  become: true
+  serial: "20%"
+  max_fail_percentage: 10
+
+  roles:
+    - role: docker_host
+      tags: [docker]

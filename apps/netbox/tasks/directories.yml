@@ -1,0 +1,31 @@
+---
+- name: Ensure the NetBox application directory exists
+  ansible.builtin.file:
+    path: "{{ netbox_app_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Ensure NetBox data subdirectories exist
+  ansible.builtin.file:
+    path: "{{ netbox_data_dir }}/{{ item }}"
+    state: directory
+    owner: "{{ netbox_container_uid }}"
+    group: "{{ netbox_container_uid }}"
+    mode: "0750"
+  loop:
+    - netbox/media
+    - netbox/reports
+    - netbox/scripts
+    - redis
+    - redis-cache
+
+- name: Ensure the bundled postgres data directory exists (lab/evaluation fallback only)
+  ansible.builtin.file:
+    path: "{{ netbox_data_dir }}/postgres"
+    state: directory
+    owner: "{{ netbox_container_uid }}"
+    group: "{{ netbox_container_uid }}"
+    mode: "0700"
+  when: not (netbox_external_database_enabled | bool)

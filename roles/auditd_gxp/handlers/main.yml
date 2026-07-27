@@ -1,0 +1,13 @@
+---
+- name: Load audit rules
+  ansible.builtin.command: augenrules --load
+  register: auditd_load_result
+  changed_when: "'no change' not in (auditd_load_result.stdout | default(''))"
+  failed_when:
+    - auditd_load_result.rc != 0
+    - "'immutable' not in (auditd_load_result.stderr | default(''))"
+  # If the running kernel audit config is already immutable (-e 2) from a
+  # previous boot, augenrules --load fails with an "immutable" error — the
+  # new rules file is on disk and correct, it just needs the host's next
+  # reboot to actually load. That's expected steady-state behavior on a
+  # hardened host, not a task failure.

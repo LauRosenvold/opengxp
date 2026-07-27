@@ -1,0 +1,3 @@
+# {{ ansible_managed | default('Managed by Ansible — server_roles/docker_host') }}
+[Service]
+ExecStartPost=/usr/local/sbin/docker-user-firewall.sh

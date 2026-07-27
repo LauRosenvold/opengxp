@@ -1,0 +1,25 @@
+---
+# Workload-enablement playbook, not part of playbooks/site.yml — see
+# docs/SERVER_ROLES.md. Assumes hosts have already been through
+# playbooks/site.yml (or at least bootstrap.yml + hardening.yml).
+#
+# Deliberately no `serial:` when a primary/replica pair is involved: the
+# primary must finish tasks/config.yml (service running) before
+# tasks/primary_replication_role.yml creates the replication role, and a
+# replica's pg_basebackup needs the primary already reachable — the same
+# "linear strategy synchronizes every host at each task boundary"
+# reasoning as server_roles/kubernetes_node. If your dbservers group is
+# entirely standalone instances with no replication relationship between
+# them, serial is safe to add back; don't assume that by default.
+#
+# Usage:
+#   ansible-playbook playbooks/postgresql_server.yml \
+#     -i inventories/staging/hosts.yml --check --diff
+
+- name: Configure PostgreSQL database servers
+  hosts: dbservers
+  become: true
+
+  roles:
+    - role: postgresql_server
+      tags: [postgresql]

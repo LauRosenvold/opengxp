@@ -1,0 +1,32 @@
+# {{ ansible_managed | default('Managed by Ansible — apps/registry') }}
+version: 0.1
+log:
+  fields:
+    service: registry
+
+storage:
+  {{ registry_storage_driver }}:
+    rootdirectory: /var/lib/registry
+  delete:
+    enabled: {{ 'true' if registry_delete_enabled else 'false' }}
+  cache:
+    blobdescriptor: inmemory
+
+http:
+  addr: :5000
+  headers:
+    X-Content-Type-Options: [nosniff]
+  tls:
+    certificate: /tls/server.crt
+    key: /tls/server.key
+
+auth:
+  htpasswd:
+    realm: "{{ registry_hostname }}"
+    path: /auth/htpasswd
+
+health:
+  storagedriver:
+    enabled: true
+    interval: 10s
+    threshold: 3

@@ -1,0 +1,8 @@
+---
+- name: Rebuild initramfs
+  ansible.builtin.command: dracut -f
+  listen: "Rebuild initramfs"
+  # Blacklisted modules that are already built into the current initramfs
+  # image stay loadable at early boot until the image is regenerated.
+  # Doesn't require a reboot by itself, but the blacklist isn't fully
+  # effective until the *next* boot uses the rebuilt image.

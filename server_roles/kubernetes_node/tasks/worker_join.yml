@@ -1,0 +1,12 @@
+---
+- name: Check whether this worker node has already joined
+  ansible.builtin.stat:
+    path: /etc/kubernetes/kubelet.conf
+  register: k8s_worker_join_stat
+
+- name: Join as a worker node
+  ansible.builtin.command: >
+    {{ hostvars[groups['k8s_control_plane'] | first].k8s_worker_join_command }}
+    --node-name {{ inventory_hostname }}
+  when: not k8s_worker_join_stat.stat.exists
+  changed_when: true

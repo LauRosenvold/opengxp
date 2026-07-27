@@ -1,0 +1,21 @@
+---
+compliance_scan_profile: "xccdf_org.ssgproject.content_profile_cis"
+compliance_scan_remote_dir: /var/log/openscap
+compliance_scan_local_artifact_dir: "{{ playbook_dir | default('.') }}/../artifacts/compliance"
+
+# scap-security-guide's datastream filename per major version, as a list
+# of candidates in preference order — the first one that actually exists
+# on disk is used. AlmaLinux rebuilds the RHEL SRPM for this package
+# largely unchanged, so it most likely ships the same ssg-rhel10-ds.xml
+# filename, but that's an assumption worth verifying rather than trusting
+# blindly — hence checking for an almalinux-named file too instead of
+# hardcoding one path. RHEL10/AlmaLinux10 content may not exist in every
+# SSG package version at all yet — handled as a soft skip (warn +
+# continue), not a hard failure, same posture as
+# roles/cis_hardening's RHEL10-CIS fallback.
+compliance_scan_datastream_candidates_by_major_version:
+  "9":
+    - /usr/share/xml/scap/ssg/content/ssg-rhel9-ds.xml
+  "10":
+    - /usr/share/xml/scap/ssg/content/ssg-rhel10-ds.xml
+    - /usr/share/xml/scap/ssg/content/ssg-almalinux10-ds.xml

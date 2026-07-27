@@ -1,0 +1,75 @@
+---
+# Only meaningful on the first control-plane node. k8s_metallb_enabled is
+# already checked by tasks/main.yml before this file is even included —
+# what's checked here is the address-pool content, which has no safe
+# default to fall back to.
+
+- name: Fail loudly if MetalLB is enabled with no address pool supplied
+  ansible.builtin.assert:
+    that:
+      - k8s_metallb_address_pools | length > 0
+    fail_msg: >-
+      k8s_metallb_enabled is true but k8s_metallb_address_pools is empty.
+      Populate it with real, unused IP ranges from your network in
+      inventories/<env>/group_vars/k8s_nodes.yml (or a more specific
+      group_vars file) before enabling this — see docs/SERVER_ROLES.md.
+  when: inventory_hostname == (groups['k8s_control_plane'] | first)
+
+- name: Apply the MetalLB manifest
+  ansible.builtin.command: >
+    kubectl --kubeconfig=/etc/kubernetes/admin.conf
+    apply -f {{ k8s_metallb_manifest_url }}
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: k8s_metallb_apply_result
+  changed_when: >-
+    'created' in (k8s_metallb_apply_result.stdout | default(''))
+    or 'configured' in (k8s_metallb_apply_result.stdout | default(''))
+  when: inventory_hostname == (groups['k8s_control_plane'] | first)
+
+- name: Wait for the MetalLB controller deployment to become available
+  ansible.builtin.command: >
+    kubectl --kubeconfig=/etc/kubernetes/admin.conf
+    -n metallb-system wait --for=condition=Available deployment/controller --timeout=180s
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  changed_when: false
+  when: inventory_hostname == (groups['k8s_control_plane'] | first)
+
+- name: Wait for the MetalLB controller pod to be Ready (its validating webhook needs this)
+  ansible.builtin.command: >
+    kubectl --kubeconfig=/etc/kubernetes/admin.conf
+    -n metallb-system wait --for=condition=Ready pod -l component=controller --timeout=180s
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  changed_when: false
+  when: inventory_hostname == (groups['k8s_control_plane'] | first)
+
+- name: Render the MetalLB IPAddressPool/L2Advertisement configuration
+  ansible.builtin.template:
+    src: metallb-config.yaml.j2
+    dest: /etc/kubernetes/metallb-config.yaml
+    owner: root
+    group: root
+    mode: "0600"
+  when: inventory_hostname == (groups['k8s_control_plane'] | first)
+
+- name: Apply the MetalLB address pool configuration
+  ansible.builtin.command: >
+    kubectl --kubeconfig=/etc/kubernetes/admin.conf
+    apply -f /etc/kubernetes/metallb-config.yaml
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: k8s_metallb_config_apply_result
+  changed_when: >-
+    'created' in (k8s_metallb_config_apply_result.stdout | default(''))
+    or 'configured' in (k8s_metallb_config_apply_result.stdout | default(''))
+  # The controller pod reporting Ready and its admission webhook's
+  # Service/endpoint actually being reachable aren't quite the same
+  # moment — a first attempt can occasionally hit
+  # "failed calling webhook" for a few seconds. Retry rather than fail
+  # the whole run over a race that resolves itself.
+  retries: 5
+  delay: 5
+  until: k8s_metallb_config_apply_result.rc == 0
+  when: inventory_hostname == (groups['k8s_control_plane'] | first)

@@ -1,0 +1,51 @@
+---
+- name: Ensure openssh-server is installed
+  ansible.builtin.dnf:
+    name: openssh-server
+    state: present
+
+- name: Deploy hardened sshd_config
+  ansible.builtin.template:
+    src: sshd_config.j2
+    dest: /etc/ssh/sshd_config
+    owner: root
+    group: root
+    mode: "0600"
+    validate: "/usr/sbin/sshd -t -f %s"
+  notify: Restart sshd
+
+- name: Set restrictive permissions on host private keys
+  ansible.builtin.shell: |
+    set -o pipefail
+    find /etc/ssh -xdev -type f -name 'ssh_host_*_key' -exec chmod 0600 {} \;
+  args:
+    executable: /bin/bash
+  changed_when: false
+
+- name: Set permissions on host public keys
+  ansible.builtin.shell: |
+    set -o pipefail
+    find /etc/ssh -xdev -type f -name 'ssh_host_*_key.pub' -exec chmod 0644 {} \;
+  args:
+    executable: /bin/bash
+  changed_when: false
+
+- name: Check for weak Diffie-Hellman moduli
+  ansible.builtin.command: >
+    awk '$5 < {{ ssh_moduli_min_bits }}' /etc/ssh/moduli
+  register: ssh_weak_moduli
+  changed_when: false
+  failed_when: false
+  when: ssh_remove_weak_moduli | bool
+
+- name: Remove weak Diffie-Hellman moduli (< {{ ssh_moduli_min_bits + 1 }} bits)
+  ansible.builtin.shell: |
+    set -o pipefail
+    awk '$5 >= {{ ssh_moduli_min_bits }}' /etc/ssh/moduli > /etc/ssh/moduli.tmp
+    mv /etc/ssh/moduli.tmp /etc/ssh/moduli
+    chmod 0600 /etc/ssh/moduli
+  args:
+    executable: /bin/bash
+  when:
+    - ssh_remove_weak_moduli | bool
+    - ssh_weak_moduli.stdout | default('') | length > 0
