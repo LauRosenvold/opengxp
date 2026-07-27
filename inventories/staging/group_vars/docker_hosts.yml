@@ -3,7 +3,7 @@
 # See the note in staging/group_vars/rhel9.yml — same rule applies here.
 #
 # Applies to any host running server_roles/docker_host, regardless of
-# which OS group (rhel9/rhel10/almalinux10) it's also in. See
+# which OS group (rhel9/rhel10/almalinux9/almalinux10) it's also in. See
 # docs/SERVER_ROLES.md for why this is a separate workload-enablement
 # layer from the roles/ compliance baseline.
 
@@ -11,7 +11,7 @@
 # RHEL10 / AlmaLinux10 (roles/el10_baseline_hardening):
 el10_baseline_ip_forward_enabled: true
 
-# RHEL9 (ansible-lockdown.RHEL9-CIS) — best-effort per-control override,
+# RHEL9 / AlmaLinux9 (ansible-lockdown.RHEL9-CIS) — best-effort per-control override,
 # matching the pattern already used in rhel9.yml's rhel9cis_rule_5_4_1_1
 # example. Control numbering for "ensure IP forwarding is disabled" has
 # historically been 3.1.1 in the CIS RHEL Benchmark, but VERIFY the exact

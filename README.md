@@ -1,8 +1,8 @@
-# RHEL 9/10 & AlmaLinux 10 Configuration & Hardening — GxP Enterprise Estate
+# RHEL 9/10 & AlmaLinux 9/10 Configuration & Hardening — GxP Enterprise Estate
 
 Ansible automation for configuring and securing a large fleet of RHEL 9,
-RHEL 10, and AlmaLinux 10 servers in a GxP-regulated environment
-(GMP/GLP/GCP). This repo
+RHEL 10, AlmaLinux 9, and AlmaLinux 10 servers in a GxP-regulated
+environment (GMP/GLP/GCP). This repo
 handles the **technical control** layer of computerized system validation —
 it does not replace the procedural controls (change control tickets, IQ/OQ/PQ
 sign-off, periodic review) your Quality organization must run around it.
@@ -39,6 +39,10 @@ environment differs:
   a deliberate per-estate choice, not something this repo can default
   correctly for you — see [docs/IDENTITY.md](docs/IDENTITY.md) before
   joining a real domain.
+- **RHEL 9 / AlmaLinux 9 CIS content:** `ansible-lockdown.RHEL9-CIS` is
+  mature/stable content with no RHEL-specific dependency, so it's used
+  directly by both the `rhel9` and `almalinux9` inventory groups — no
+  fallback role needed, unlike the RHEL10/AlmaLinux10 case below.
 - **RHEL 10 / AlmaLinux 10 CIS content:** `ansible-lockdown.RHEL10-CIS` was
   not yet a tagged, stable release at authoring time, and no CIS automation
   role exists for AlmaLinux at all. `roles/cis_hardening` detects whether
@@ -54,6 +58,7 @@ environment differs:
   content-manage it against a custom AlmaLinux content view. If your
   Satellite doesn't do that and you point AlmaLinux hosts at public
   mirrors instead, set `satellite_registration_enabled: false` in
+  `inventories/<env>/group_vars/almalinux9.yml` /
   `inventories/<env>/group_vars/almalinux10.yml` to skip
   `roles/satellite_registration` for that group.
 - **No playbook ever connects as root.** Every playbook here connects and

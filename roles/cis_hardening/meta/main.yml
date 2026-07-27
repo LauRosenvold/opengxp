@@ -1,7 +1,7 @@
 ---
 galaxy_info:
   role_name: cis_hardening
-  description: Dispatcher that routes to ansible-lockdown.RHEL9-CIS or el10_baseline_hardening by OS group (see inventories/*/group_vars/{rhel9,rhel10,almalinux10}.yml)
+  description: Dispatcher that routes to ansible-lockdown.RHEL9-CIS or el10_baseline_hardening by OS group (see inventories/*/group_vars/{rhel9,rhel10,almalinux9,almalinux10}.yml)
   license: Apache-2.0
   min_ansible_version: "2.15"
   platforms:

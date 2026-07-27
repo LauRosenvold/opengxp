@@ -30,13 +30,16 @@ collections:
 
 roles:
   # CIS Benchmark automation, maintained by ansible-lockdown.
-  # RHEL9-CIS is mature/stable. RHEL10-CIS did not exist as usable,
-  # released content at the time this repo was authored — do NOT assume
-  # it is available. There is also no dedicated CIS automation role for
-  # AlmaLinux at all (any major version). roles/cis_hardening/ probes for
-  # RHEL10-CIS at run time and falls back to roles/el10_baseline_hardening
-  # (a hand-built role covering the same CIS domains, shared by both
-  # rhel10 and almalinux10 inventory groups) when it isn't installed.
+  # RHEL9-CIS is mature/stable, and has no RHEL-specific dependency, so
+  # both the rhel9 and almalinux9 inventory groups use it directly (see
+  # inventories/*/group_vars/{rhel9,almalinux9}.yml) — no AlmaLinux-specific
+  # CIS role is needed at major version 9. RHEL10-CIS did not exist as
+  # usable, released content at the time this repo was authored — do NOT
+  # assume it is available. There is also no dedicated CIS automation role
+  # for AlmaLinux 10 at all. roles/cis_hardening/ probes for RHEL10-CIS at
+  # run time and falls back to roles/el10_baseline_hardening (a hand-built
+  # role covering the same CIS domains, shared by both rhel10 and
+  # almalinux10 inventory groups) when it isn't installed.
   # Re-check https://github.com/ansible-lockdown/RHEL10-CIS periodically
   # and switch the fallback off for RHEL10 once that role is GA and
   # validated — AlmaLinux10 stays on the fallback regardless, since

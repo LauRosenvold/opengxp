@@ -66,7 +66,10 @@ context, under real operational use.
   roles) has moved, and whether RHEL10-CIS has reached a state where the
   `el10_baseline_hardening` fallback can be retired for the `rhel10`
   group. The `almalinux10` group stays on the fallback regardless, since
-  no upstream CIS role targets AlmaLinux at all.
+  no upstream CIS role targets AlmaLinux at all. The `rhel9` and
+  `almalinux9` groups already use `ansible-lockdown.RHEL9-CIS` directly —
+  still worth checking each quarter for a version bump to re-validate,
+  but neither group is waiting on a fallback to be retired.
 
 ## What this repo deliberately does NOT attempt
 

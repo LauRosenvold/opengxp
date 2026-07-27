@@ -1,7 +1,8 @@
 ---
 # Registration is on by default, but some OS groups may not use Satellite
 # at all (e.g. an AlmaLinux host pointed at public AlmaLinux mirrors
-# instead — see inventories/production/group_vars/almalinux10.yml). Set
+# instead — see inventories/production/group_vars/almalinux9.yml /
+# almalinux10.yml). Set
 # satellite_registration_enabled: false per-group to skip this role
 # entirely for those hosts rather than forcing every OS through RHSM/
 # Satellite registration.

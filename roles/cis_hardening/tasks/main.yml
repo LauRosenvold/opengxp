@@ -15,7 +15,8 @@
     fail_msg: >-
       cis_hardening_engine must be 'lockdown_role' or 'fallback_role'
       (got '{{ cis_hardening_engine }}'), set per-OS in
-      inventories/<env>/group_vars/rhel9.yml / rhel10.yml / almalinux10.yml.
+      inventories/<env>/group_vars/rhel9.yml / rhel10.yml /
+      almalinux9.yml / almalinux10.yml.
 
 - name: Warn when running the EL10 fallback (temporary state, not the target state)
   ansible.builtin.debug:

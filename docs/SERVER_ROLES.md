@@ -49,7 +49,7 @@ one step further down.
 
 ## `docker_host`
 
-Turns a hardened RHEL9/RHEL10/AlmaLinux10 host into a generic Docker
+Turns a hardened RHEL9/RHEL10/AlmaLinux9/AlmaLinux10 host into a generic Docker
 workload host. Run via `playbooks/docker_host.yml` against the
 `docker_hosts` inventory group (present, empty, in all three
 environments — populate with real hostnames the same way as the OS
@@ -75,11 +75,12 @@ groups).
   it's never silently broken — but `group_vars/docker_hosts.yml` also
   carries the "proper" per-tier override
   (`el10_baseline_ip_forward_enabled: true` for RHEL10/AlmaLinux10, a
-  best-effort `rhel9cis_rule_3_1_1: false` for RHEL9 that you should
-  verify against your installed `ansible-lockdown.RHEL9-CIS` version).
-  Without that override, a later `hardening.yml` re-run (it's designed to
-  be safe to schedule — see `playbooks/hardening.yml`) could flip RHEL9's
-  forwarding back off until `docker_host` next runs and re-asserts it.
+  best-effort `rhel9cis_rule_3_1_1: false` for RHEL9/AlmaLinux9 that you
+  should verify against your installed `ansible-lockdown.RHEL9-CIS`
+  version). Without that override, a later `hardening.yml` re-run (it's
+  designed to be safe to schedule — see `playbooks/hardening.yml`) could
+  flip RHEL9/AlmaLinux9's forwarding back off until `docker_host` next
+  runs and re-asserts it.
 
 - **`/var/lib/docker` is deliberately excluded from AIDE.** Image layers
   and container filesystems change constantly; watching that path would

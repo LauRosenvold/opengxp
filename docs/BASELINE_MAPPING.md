@@ -4,12 +4,16 @@ This is a domain-level map, not a control-by-control checklist (the CIS
 Benchmark PDF and the `ansible-lockdown` role's own `defaults/main.yml`
 are the source of truth for individual control IDs). Use this to answer
 "which role is responsible for section N of the benchmark" during audit
-prep, and to see where RHEL9, RHEL10, and AlmaLinux 10 diverge in this
-repo. RHEL10 and AlmaLinux10 are listed as one column because they run
-the identical `el10_baseline_hardening` fallback role — there is no
-per-distro difference to call out at this domain level.
+prep, and to see where RHEL9, RHEL10, AlmaLinux 9, and AlmaLinux 10
+diverge in this repo. RHEL9 and AlmaLinux9 are listed as one column
+because they run the identical `ansible-lockdown.RHEL9-CIS` role — that
+role is mature/stable content with no RHEL-specific dependency, so
+AlmaLinux9 needs no fallback (contrast with AlmaLinux10, below). RHEL10
+and AlmaLinux10 are listed as one column because they run the identical
+`el10_baseline_hardening` fallback role — there is no per-distro
+difference to call out at this domain level.
 
-| CIS Benchmark domain                              | RHEL 9 (control host)                         | RHEL 10 / AlmaLinux 10 (until RHEL10-CIS is GA)  |
+| CIS Benchmark domain                              | RHEL 9 / AlmaLinux 9 (control host)             | RHEL 10 / AlmaLinux 10 (until RHEL10-CIS is GA)  |
 |-----------------------------------------------------|-------------------------------------------------|---------------------------------------------------|
 | 1. Initial setup (filesystem, partitions, modules) | `ansible-lockdown.RHEL9-CIS` (section1)         | `el10_baseline_hardening` (filesystem/module tasks) |
 | 1. Software updates / GPG / repos                  | `ansible-lockdown.RHEL9-CIS` + `satellite_registration` | same (`satellite_registration` is skippable per-group via `satellite_registration_enabled` — see almalinux10.yml) |
@@ -22,7 +26,7 @@ per-distro difference to call out at this domain level.
 | SELinux                                              | `selinux_enforce` (independent of major version/distro — same role for all) | same |
 | Firewall                                             | `firewalld_baseline` (independent of major version/distro) | same |
 | Time sync                                            | `chrony_time` (independent of major version/distro)    | same |
-| Compliance evidence (OpenSCAP)                       | `compliance_scan` against `ssg-rhel9-ds.xml`     | `compliance_scan` against `ssg-rhel10-ds.xml`, falling back to `ssg-almalinux10-ds.xml` if the RHEL-named file isn't present — see `roles/compliance_scan/defaults/main.yml` |
+| Compliance evidence (OpenSCAP)                       | `compliance_scan` against `ssg-rhel9-ds.xml`, falling back to `ssg-almalinux9-ds.xml` if the RHEL-named file isn't present | `compliance_scan` against `ssg-rhel10-ds.xml`, falling back to `ssg-almalinux10-ds.xml` if the RHEL-named file isn't present — see `roles/compliance_scan/defaults/main.yml` |
 
 ## Why some domains are handled outside the lockdown role at all
 
@@ -65,20 +69,32 @@ file (e.g. `/etc/ssh/sshd_config`), execution order in
 `auditd_gxp`, and `user_access_gxp`, so the GxP-specific roles are the
 final, authoritative write.
 
-## Why `almalinux10` is a separate inventory group, not folded into `rhel10`
+## Why `almalinux9` / `almalinux10` are separate inventory groups, not folded into `rhel9` / `rhel10`
 
 Every role in this repo keys off OS major version or plain package/service
 presence, never `ansible_distribution`, so nothing technically stops you
-from putting AlmaLinux hosts in the `rhel10` group. It's kept separate
-anyway because:
+from putting AlmaLinux hosts in the `rhel9` or `rhel10` group. They're
+kept separate anyway because:
 
 - An inventory listing should tell you the real OS/support vendor at a
   glance — that matters for audit prep and for anyone triaging a CVE that
   turns out to be Red-Hat-support-channel-specific.
 - `satellite_registration_enabled` and any future AlmaLinux-specific
-  variable belongs on its own group_vars file, not mixed into rhel10's.
+  variable belongs on its own group_vars file, not mixed into rhel9's or
+  rhel10's.
 
-If you later add AlmaLinux 9 or Rocky Linux, follow the same pattern: a
-new inventory group, its own `group_vars/<group>.yml` pointing
-`cis_hardening_role_name` at whichever engine actually applies, rather
-than overloading an existing RHEL-named group.
+Note that `almalinux9` and `almalinux10` don't point at the same CIS
+engine as each other, even though both mirror their respective `rhelN`
+group: `almalinux9` uses `lockdown_role` (`ansible-lockdown.RHEL9-CIS`),
+same as `rhel9`, because that role is mature/stable and has no
+RHEL-specific dependency; `almalinux10` uses `fallback_role`
+(`el10_baseline_hardening`), same as `rhel10`, because no tagged
+RHEL10-CIS release exists yet. Always check what the corresponding
+`rhelN` group is doing before assuming the pattern from one AlmaLinux
+group carries over to another.
+
+If you later add Rocky Linux (or another EL9/EL10 rebuild), follow the
+same pattern: a new inventory group, its own `group_vars/<group>.yml`
+pointing `cis_hardening_role_name` at whichever engine actually applies
+for that major version, rather than overloading an existing RHEL-named
+group.

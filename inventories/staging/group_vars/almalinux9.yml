@@ -1,0 +1,38 @@
+---
+# CANONICAL COPY LIVES IN inventories/production/group_vars/almalinux9.yml
+# See the note in staging/group_vars/rhel9.yml — same rule applies here.
+#
+# Vars specific to the almalinux9 inventory group. AlmaLinux 9 is
+# binary-compatible with RHEL 9 at the package/systemd/PAM level, so this
+# largely mirrors inventories/production/group_vars/rhel9.yml — kept as a
+# separate group (not folded into rhel9) so the inventory always shows
+# the real OS/support vendor at a glance. See docs/BASELINE_MAPPING.md.
+
+ansible_python_interpreter: /usr/bin/python3.9
+
+# Unlike almalinux10 (see that group's note), ansible-lockdown.RHEL9-CIS
+# is mature/stable upstream content and has no RHEL-specific dependency
+# that breaks on AlmaLinux — use it directly here too, same as rhel9, no
+# fallback role needed.
+cis_hardening_engine: "lockdown_role"
+cis_hardening_role_name: "ansible-lockdown.RHEL9-CIS"
+
+# ansible-lockdown.RHEL9-CIS section toggles — same reasoning as
+# rhel9.yml (this repo overrides section4/section5/section6-adjacent
+# SSH+audit+sudo behavior with our own roles run afterward — see
+# docs/BASELINE_MAPPING.md — so we disable the overlapping subsections
+# here to avoid two roles fighting over the same file).
+rhel9cis_section4_disable: true   # auditd handled by roles/auditd_gxp instead
+rhel9cis_section5_ssh_disable: true  # SSH handled by roles/ssh_hardening instead
+rhel9cis_bootloader_password: false  # set true once a vaulted grub password is supplied
+rhel9cis_rule_5_4_1_1: false          # example: per-control opt-out pattern; document any use of this in the change ticket
+
+# AlmaLinux carries no Red Hat subscription entitlement, so there is
+# nothing for subscription-manager to "consume" — but Satellite/Katello
+# can still register and content-manage a non-RHEL client against a
+# custom AlmaLinux content view mapped to the same activation key
+# mechanism. If your Satellite doesn't manage AlmaLinux hosts and you
+# instead point them at public AlmaLinux mirrors directly, set this to
+# false and manage repos outside this repo (roles/patch_management still
+# works against whatever repos dnf sees either way).
+satellite_registration_enabled: true

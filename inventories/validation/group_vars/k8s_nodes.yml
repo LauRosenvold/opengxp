@@ -10,8 +10,8 @@
 # --- Undo the fleet-wide "no IP forwarding" baseline for these hosts only ----
 # Same reasoning as inventories/production/group_vars/docker_hosts.yml —
 # see that file's comments and docs/SERVER_ROLES.md for the caveat about
-# a later hardening.yml re-run on rhel9 potentially flipping this back
-# until server_roles/kubernetes_node next runs and re-asserts it.
+# a later hardening.yml re-run on rhel9/almalinux9 potentially flipping
+# this back until server_roles/kubernetes_node next runs and re-asserts it.
 el10_baseline_ip_forward_enabled: true
 rhel9cis_rule_3_1_1: false   # best-effort — verify against your installed ansible-lockdown.RHEL9-CIS version
 
