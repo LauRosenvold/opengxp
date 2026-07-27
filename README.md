@@ -1,12 +1,30 @@
-# RHEL 9/10 & AlmaLinux 9/10 Configuration & Hardening — GxP Enterprise Estate
+# opengxp
 
-Ansible automation for configuring and securing a large fleet of RHEL 9,
-RHEL 10, AlmaLinux 9, and AlmaLinux 10 servers in a GxP-regulated
-environment (GMP/GLP/GCP). This repo
-handles the **technical control** layer of computerized system validation —
-it does not replace the procedural controls (change control tickets, IQ/OQ/PQ
-sign-off, periodic review) your Quality organization must run around it.
-See [docs/VALIDATION.md](docs/VALIDATION.md) for how the two fit together.
+**opengxp** is Ansible automation for configuring and securing a large
+fleet of RHEL 9, RHEL 10, AlmaLinux 9, and AlmaLinux 10 servers in a
+GxP-regulated environment (GMP/GLP/GCP).
+
+Standing up GxP-compliant infrastructure normally means re-deriving the
+same CIS-to-GxP mapping by hand for every estate: which hardening
+controls apply, which need to be superseded or extended for a specific
+audit event taxonomy, how compliance evidence gets generated and
+preserved, and how all of that stays consistent across dev/staging/
+validation/production without drifting. opengxp packages that mapping
+as a ready-to-run, change-controlled Ansible codebase — CIS Benchmark
+hardening (via upstream `ansible-lockdown` roles where mature, a
+hand-built fallback where it isn't yet), a GxP-specific audit event
+taxonomy, segregation-of-duties access control, OpenSCAP compliance
+evidence generation, and pluggable workload-enablement layers (Docker,
+Kubernetes, PostgreSQL) and application deployments (NetBox, a private
+registry) on top — so building and validating a new regulated host is a
+matter of adding it to inventory and running a playbook, not
+re-authoring the control baseline from scratch.
+
+This repo handles the **technical control** layer of computerized system
+validation — it does not replace the procedural controls (change control
+tickets, IQ/OQ/PQ sign-off, periodic review) your Quality organization
+must run around it. See [docs/VALIDATION.md](docs/VALIDATION.md) for how
+the two fit together.
 
 ## Assumptions baked into this design
 
