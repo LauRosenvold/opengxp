@@ -1,0 +1,76 @@
+---
+- name: Ensure the TLS directory exists
+  ansible.builtin.file:
+    path: "{{ nginx_tls_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Deploy a real TLS certificate and key, if supplied
+  ansible.builtin.copy:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - { src: "{{ nginx_ssl_cert_src }}", dest: "{{ nginx_tls_dir }}/server.crt" }
+    - { src: "{{ nginx_ssl_key_src }}", dest: "{{ nginx_tls_dir }}/server.key" }
+  loop_control:
+    label: "{{ item.dest }}"
+  when:
+    - nginx_ssl_cert_src | length > 0
+    - nginx_ssl_key_src | length > 0
+  notify: Restart nginx container
+  # Both cert and key end up world-readable (0644), unlike
+  # server_roles/postgresql_server's 0600 key: the nginx-unprivileged
+  # container reads this file across a bind mount as its own internal
+  # non-root UID (not pinned as a contract by this role), and bind mounts
+  # don't remap ownership — same exact trade-off apps/netbox already
+  # accepted, see that role's tasks/tls.yml for the fuller explanation.
+
+- name: Check whether a self-signed certificate already exists
+  ansible.builtin.stat:
+    path: "{{ nginx_tls_dir }}/server.crt"
+  register: nginx_selfsigned_cert_stat
+  when: nginx_ssl_cert_src | length == 0
+
+- name: Warn that a self-signed certificate is being generated
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: nginx_ssl_cert_src/key_src are empty on
+      {{ inventory_hostname }} — generating a self-signed certificate.
+      Fine for lab/staging, NOT approved for a real GxP production
+      deployment. Point those vars at a real CA-issued cert/key once you
+      have one — see docs/APPS.md.
+  when:
+    - nginx_ssl_cert_src | length == 0
+    - not nginx_selfsigned_cert_stat.stat.exists
+
+- name: Generate a self-signed certificate and key
+  ansible.builtin.command: >
+    openssl req -new -x509 -days {{ nginx_ssl_self_signed_days }}
+    -nodes -text
+    -out {{ nginx_tls_dir }}/server.crt
+    -keyout {{ nginx_tls_dir }}/server.key
+    -subj "/CN={{ (nginx_vhosts[0].server_name | default(inventory_hostname)) if nginx_vhosts | length > 0 else inventory_hostname }}"
+  when:
+    - nginx_ssl_cert_src | length == 0
+    - not nginx_selfsigned_cert_stat.stat.exists
+  changed_when: true
+  notify: Restart nginx container
+  # Single cert shared by every vhost (see defaults/main.yml) — the
+  # self-signed CN is only ever a starting point for lab/staging use, so
+  # it takes the first configured vhost's name, or this host's own
+  # inventory_hostname if no vhosts are configured yet.
+
+- name: Ensure correct ownership/permissions on the certificate and key
+  ansible.builtin.file:
+    path: "{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - "{{ nginx_tls_dir }}/server.crt"
+    - "{{ nginx_tls_dir }}/server.key"

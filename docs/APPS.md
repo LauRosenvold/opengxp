@@ -220,6 +220,78 @@ itself.
   anything. Fine-grained per-repository permissions need a token-auth
   server (or a different product) this role doesn't implement.
 
+## `nginx`
+
+A standalone, general-purpose containerized nginx, deployed as a
+one-service Docker Compose stack on top of a `server_roles/docker_host`.
+Run via `playbooks/nginx.yml` against the `nginx_hosts` inventory
+group — every host in it should also be in `docker_hosts`.
+
+`apps/netbox` and `apps/registry` each already handle their own TLS
+(netbox: a bundled nginx sidecar that only ever proxies to netbox
+itself; registry: native TLS, no proxy at all) — this role is for
+everything else: fronting a backend that doesn't terminate TLS itself,
+serving static content (compliance documentation, internal artifacts,
+...), or standing up more than one virtual host behind a single
+entrypoint. It is not a replacement for either of those two roles' own
+bundled nginx use — each is scoped tightly to its own application and
+stays that way.
+
+### Things that are NOT obvious and will bite you if skipped
+
+- **`nginx_vhosts` is a flat list, and every vhost shares one TLS
+  cert.** Each entry is either `mode: static` (serves a bind-mounted
+  directory under `nginx_content_dir`) or `mode: proxy` (reverse-proxies
+  to an upstream URL) — see `defaults/main.yml` for the full shape.
+  `tasks/validate.yml` fails the run loudly on a missing `server_name`,
+  an invalid/missing `mode`, a `static` vhost without `content_subdir`,
+  a `proxy` vhost without `proxy_pass`, or two vhosts sharing the same
+  `server_name`. If you need per-vhost certificates instead of one
+  shared cert, that's a distinct enough design decision this role
+  doesn't make for you — run a separate `nginx_hosts` instance.
+- **Default-deny for any unmatched Host header**, same posture as
+  `roles/firewalld_baseline`. A request that doesn't match any
+  configured `server_name` gets `444` (connection closed, no response)
+  rather than silently falling through to whichever vhost happens to be
+  defined first in the rendered config. The one exception is
+  `/healthz`, which always answers `200` regardless of Host header —
+  that's what the compose healthcheck targets, deliberately independent
+  of whether any vhost is configured yet (`nginx_vhosts: []` is valid).
+- **This role does not populate vhost content.** `mode: static`
+  vhosts get an empty, correctly-permissioned directory
+  (`tasks/directories.yml`) — putting `index.html` and friends in it is
+  a separate step, same "this role deploys the platform, not your
+  content" posture as `apps/netbox` not shipping DCIM data.
+- **TLS follows the same self-signed-default/real-cert-pluggable
+  pattern** as `apps/netbox`/`apps/registry`/
+  `server_roles/postgresql_server` (`nginx_ssl_cert_src`/`_key_src`).
+  The self-signed certificate's CN comes from the first configured
+  vhost's `server_name`, or this host's own `inventory_hostname` if
+  `nginx_vhosts` is still empty. Cert and key end up world-readable
+  (`0644`) for the same nginx-unprivileged-non-root-UID reason as
+  `apps/netbox` — see the comment in `tasks/tls.yml`.
+- **nginx config and TLS material changes need an explicit restart** —
+  same reasoning, and the same dedicated `docker compose restart nginx`
+  handler pattern, as `apps/netbox`.
+
+### What's intentionally out of scope
+
+- **Rate limiting, WAF rules, request authentication** — plain
+  reverse-proxy/static-file nginx; anything beyond `proxy_pass` and
+  `ssl_*` directives is a config change you make directly in
+  `templates/nginx.conf.j2` (or a documented gap here to extend, not a
+  feature this role tries to expose as its own variables for every
+  possible nginx directive).
+- **Per-vhost certificates** — see above; one cert per `nginx_hosts`
+  instance, not per vhost.
+- **High availability / load balancing across multiple nginx
+  instances** — single-instance-per-host, same "no HA" scope note as
+  `apps/netbox` and `apps/registry`.
+- **Content deployment/sync for `mode: static` vhosts** — this role
+  creates the directory; getting your actual files into it (rsync, a CI
+  artifact push, another Ansible role) is a separate, application-specific
+  exercise.
+
 ## Wiring other roles to a registry once one exists
 
 Several CHANGEME/registry-mirror vars elsewhere in this repo exist

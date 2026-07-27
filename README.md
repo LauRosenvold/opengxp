@@ -105,13 +105,14 @@ environment differs:
   failover, and WAL archiving is a mechanism, not a backup strategy — see
   [docs/SERVER_ROLES.md](docs/SERVER_ROLES.md)'s `postgresql_server`
   section before using this on anything real.
-- **Application deployments (NetBox, a private registry, ...) live in
-  `apps/`, a third tier below `server_roles/`.** An application runs *on
-  top of* a `server_roles/` platform (e.g. `apps/netbox` and
-  `apps/registry` both on a `server_roles/docker_host`) rather than
-  replacing it — see [docs/APPS.md](docs/APPS.md). Same "not part of
-  `site.yml`, own inventory group, own change-control weight" pattern,
-  one step further down.
+- **Application deployments (NetBox, a private registry, standalone
+  nginx, ...) live in `apps/`, a third tier below `server_roles/`.** An
+  application runs *on top of* a `server_roles/` platform (e.g.
+  `apps/netbox`, `apps/registry`, and `apps/nginx` all on a
+  `server_roles/docker_host`) rather than replacing it — see
+  [docs/APPS.md](docs/APPS.md). Same "not part of `site.yml`, own
+  inventory group, own change-control weight" pattern, one step further
+  down.
 - **The private registry (`apps/registry`) requires authentication for
   every push and pull, always, and images are immutable by default**
   (deletion off, no garbage collection, until you set a documented
@@ -119,6 +120,12 @@ environment differs:
   unlike NetBox. See [docs/APPS.md](docs/APPS.md)'s `registry` section,
   including how to point other roles' registry-mirror vars at it once
   it's running.
+- **`apps/nginx` is a standalone reverse-proxy/static-content server,
+  distinct from netbox's and registry's own bundled TLS handling.**
+  Configurable per-vhost (`mode: static` or `mode: proxy`), default-deny
+  (`444`) for any Host header that doesn't match a configured vhost,
+  same self-signed-default/real-cert-pluggable TLS pattern as everything
+  else in this repo. See [docs/APPS.md](docs/APPS.md)'s `nginx` section.
 - **VM provisioning (`provisioning/vm_provision`) is a fourth tier that
   runs *before* everything above — it creates the VM itself** against
   vCenter, Hyper-V, or Proxmox VE, before any managed Linux host exists
@@ -175,6 +182,7 @@ playbooks/
   postgresql_server.yml        # workload enablement, NOT part of site.yml
   netbox.yml                   # application deployment, NOT part of site.yml — see APPS.md
   registry.yml                 # application deployment, NOT part of site.yml — see APPS.md
+  nginx.yml                    # application deployment, NOT part of site.yml — see APPS.md
   provision_vm_vcenter.yml     # creates a VM from a vCenter template — runs BEFORE any of the above, see PROVISIONING.md
   provision_vm_hyperv.yml      # creates a VM from a Hyper-V template — runs BEFORE any of the above, see PROVISIONING.md
   provision_vm_proxmox.yml     # creates a VM from a Proxmox VE template — runs BEFORE any of the above, see PROVISIONING.md
@@ -207,6 +215,7 @@ server_roles/                  # workload enablement — separate change-control
 apps/                           # application deployments on top of server_roles/ — separate again, see APPS.md
   netbox/                         # NetBox Docker Compose stack: nginx TLS proxy, external-DB-recommended, containerized Redis
   registry/                       # Private Docker/OCI registry: native TLS, mandatory htpasswd auth, immutable images by default
+  nginx/                          # Standalone containerized nginx: per-vhost static content or reverse proxy, default-deny unmatched Host
 provisioning/                   # creates the VM itself, before any tier above applies — see PROVISIONING.md
   vm_provision/                    # vCenter (community.vmware), Hyper-V (ansible.windows + PowerShell), or Proxmox VE (community.proxmox), clone from template
   dns_registration/                # Windows DNS Server A/CNAME/PTR records via WinRM — see PKI_DNS.md
@@ -218,7 +227,7 @@ docs/
   CHANGE_CONTROL.md              # branching/approval model expected around this repo
   BASELINE_MAPPING.md            # CIS control -> role/task cross-reference
   SERVER_ROLES.md                # why server_roles/ is separate from roles/, and per-role specifics
-  APPS.md                        # why apps/ is a third tier below server_roles/, plus netbox/registry specifics
+  APPS.md                        # why apps/ is a third tier below server_roles/, plus netbox/registry/nginx specifics
   IDENTITY.md                    # AD/IdM join, SSH/sudo group mapping, ID mapping choice, GSSAPI SSH
   PROVISIONING.md                # why provisioning/ runs before every other tier, vCenter/Hyper-V/Proxmox specifics
   PKI_DNS.md                     # DNS record + Windows-PKI certificate provisioning, why WinRM was chosen
@@ -359,11 +368,20 @@ immutable by default):
 ansible-playbook playbooks/registry.yml -i inventories/staging/hosts.yml --check --diff
 ```
 
+Deploy standalone nginx (same already-a-Docker-host caveat,
+`nginx_hosts` group; read [docs/APPS.md](docs/APPS.md) first — an empty
+`nginx_vhosts` is valid and deploys a healthy but content-free stack,
+useful as a starting point before you populate real vhosts):
+
+```bash
+ansible-playbook playbooks/nginx.yml -i inventories/staging/hosts.yml --check --diff
+```
+
 Request a TLS certificate from an internal Windows CA (ADCS) for
 whichever of the above needs one — see
 [docs/PKI_DNS.md](docs/PKI_DNS.md) for the manager-approval-pending
 workflow and how to plug the result into `netbox_ssl_cert_src`/
-`registry_ssl_cert_src`/`postgresql_ssl_cert_src`:
+`registry_ssl_cert_src`/`nginx_ssl_cert_src`/`postgresql_ssl_cert_src`:
 
 ```bash
 ansible-playbook playbooks/request_certificate.yml -i inventories/staging/hosts.yml \

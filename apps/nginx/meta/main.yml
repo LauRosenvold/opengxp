@@ -1,0 +1,16 @@
+---
+galaxy_info:
+  role_name: nginx
+  description: >-
+    Standalone containerized nginx (reverse proxy and/or static content
+    server, per-vhost) deployed on top of an already-provisioned
+    server_roles/docker_host. TLS-terminating, self-signed default with
+    a real-cert-pluggable path, default-deny for any unmatched Host
+    header. Lives in apps/, a third tier below server_roles/ — see
+    docs/APPS.md.
+  license: Apache-2.0
+  min_ansible_version: "2.15"
+  platforms:
+    - name: EL
+      versions: ["9", "10"]
+dependencies: []

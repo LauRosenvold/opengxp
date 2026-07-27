@@ -1,0 +1,74 @@
+# {{ ansible_managed | default('Managed by Ansible — apps/nginx') }}
+# nginx-unprivileged can't bind ports below 1024 — listens on 8080/8443
+# internally, mapped to nginx_http_port/nginx_https_port on the host
+# side via the compose file's port mapping.
+
+server {
+    listen 8080 default_server;
+    server_name _;
+{% if nginx_http_redirect %}
+    return 301 https://$host$request_uri;
+{% else %}
+    return 444;
+{% endif %}
+}
+
+server {
+    listen 8443 ssl default_server;
+    server_name _;
+
+    ssl_certificate     /etc/nginx/tls/server.crt;
+    ssl_certificate_key /etc/nginx/tls/server.key;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_ciphers         HIGH:!aNULL:!MD5;
+
+    # Always answers, regardless of Host header — a Docker Compose
+    # healthcheck target that doesn't depend on any vhost actually being
+    # configured yet (nginx_vhosts is allowed to be empty).
+    location /healthz {
+        default_type text/plain;
+        return 200 "ok\n";
+    }
+
+    # Default-deny for any request whose Host header doesn't match one
+    # of the vhosts below — same posture as roles/firewalld_baseline's
+    # default-deny zones. Not a catch-all "serve something anyway"
+    # fallback.
+    location / {
+        return 444;
+    }
+}
+
+{% for vhost in nginx_vhosts %}
+server {
+    listen 8443 ssl;
+    server_name {{ vhost.server_name }};
+
+    ssl_certificate     /etc/nginx/tls/server.crt;
+    ssl_certificate_key /etc/nginx/tls/server.key;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_ciphers         HIGH:!aNULL:!MD5;
+
+    access_log /var/log/nginx/{{ vhost.server_name }}-access.log;
+    error_log  /var/log/nginx/{{ vhost.server_name }}-error.log;
+
+{% if vhost.mode == 'static' %}
+    root /usr/share/nginx/content/{{ vhost.content_subdir }};
+    index index.html;
+
+    location / {
+        try_files $uri $uri/ =404;
+    }
+{% elif vhost.mode == 'proxy' %}
+    client_max_body_size 25m;
+
+    location / {
+        proxy_pass {{ vhost.proxy_pass }};
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+{% endif %}
+}
+{% endfor %}

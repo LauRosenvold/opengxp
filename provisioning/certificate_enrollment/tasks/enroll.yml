@@ -208,6 +208,7 @@
           docs/CHANGE_CONTROL.md):
             apps/netbox                    -> netbox_ssl_cert_src / netbox_ssl_key_src
             apps/registry                   -> registry_ssl_cert_src / registry_ssl_key_src
+            apps/nginx                      -> nginx_ssl_cert_src / nginx_ssl_key_src
             server_roles/postgresql_server  -> postgresql_ssl_cert_src / postgresql_ssl_key_src
 
           Record this certificate's serial number (open the .cer file, or

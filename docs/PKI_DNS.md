@@ -113,6 +113,7 @@ pluggable cert vars at the fetched files, as a normal reviewed
 |---|---|
 | `apps/netbox` | `netbox_ssl_cert_src` / `netbox_ssl_key_src` |
 | `apps/registry` | `registry_ssl_cert_src` / `registry_ssl_key_src` |
+| `apps/nginx` | `nginx_ssl_cert_src` / `nginx_ssl_key_src` |
 | `server_roles/postgresql_server` | `postgresql_ssl_cert_src` / `postgresql_ssl_key_src` |
 
 **CA chain.** The role also exports and fetches the issuing CA's own

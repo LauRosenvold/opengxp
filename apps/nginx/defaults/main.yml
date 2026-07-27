@@ -1,0 +1,65 @@
+---
+# A standalone containerized nginx, deployed as a one-service Docker
+# Compose stack on top of an already-provisioned server_roles/docker_host.
+# This is application deployment, not platform enablement — see
+# docs/APPS.md. Runs against the `nginx_hosts` inventory group; every
+# host in it should also be in `docker_hosts`.
+#
+# apps/netbox and apps/registry each already roll their own
+# single-purpose TLS termination (netbox: a bundled nginx sidecar;
+# registry: native TLS, no proxy at all) — this role is for everything
+# else: fronting a backend that doesn't terminate TLS itself, serving
+# static content (compliance documentation, internal artifacts, ...), or
+# standing up more than one virtual host behind a single entrypoint. See
+# docs/APPS.md's `nginx` section before deciding whether this or one of
+# those two is the right fit for a given use case.
+
+# --- Image ------------------------------------------------------------------------
+# nginx-unprivileged, same choice apps/netbox already made and for the
+# same reason — no container in this repo runs its main process as root,
+# even though Ansible itself performs privileged tasks via become.
+nginx_image: "docker.io/nginxinc/nginx-unprivileged:1.27-alpine"
+
+# --- Hostname / networking -----------------------------------------------------
+nginx_https_port: 443
+nginx_http_port: 80
+nginx_http_redirect: true   # true = plain-HTTP requests get a 301 to HTTPS; false = also serve content over plain HTTP — never do this in production
+
+# --- Filesystem layout -----------------------------------------------------------
+nginx_app_dir: /opt/nginx
+nginx_content_dir: "{{ nginx_app_dir }}/content"   # one subdirectory per "mode: static" vhost — see nginx_vhosts below
+nginx_tls_dir: "{{ nginx_app_dir }}/tls"
+nginx_log_dir: "{{ nginx_app_dir }}/logs"           # bind-mounted access/error logs, one pair per vhost — same "auditable host path, not a named volume" posture as apps/registry's storage_dir
+
+# --- TLS -----------------------------------------------------------------------
+# Same self-signed-default/real-cert-pluggable pattern as apps/netbox,
+# apps/registry, and server_roles/postgresql_server. Every vhost below
+# shares this one cert — if you need per-vhost certificates, that's a
+# distinct enough design decision this role doesn't make for you; run a
+# separate nginx_hosts instance instead.
+nginx_ssl_cert_src: ""
+nginx_ssl_key_src: ""
+nginx_ssl_self_signed_days: 825
+
+# --- Virtual hosts ---------------------------------------------------------------
+# One entry per server_name; empty is valid (the stack still deploys,
+# serving nothing but /healthz and a default-deny 444 for everything
+# else — see templates/nginx.conf.j2). Each entry:
+#   server_name:     required — matches the TLS cert's CN/SAN and what
+#                     clients actually connect to.
+#   mode:             "static" or "proxy", required.
+#   content_subdir:   required for mode: static — a subdirectory under
+#                     nginx_content_dir, bind-mounted read-only into the
+#                     container and created for you by tasks/directories.yml.
+#   proxy_pass:       required for mode: proxy — the upstream URL, e.g.
+#                     "http://appserver.gxp.example.internal:8080".
+#
+# Example:
+#   nginx_vhosts:
+#     - server_name: docs.gxp.example.internal
+#       mode: static
+#       content_subdir: docs
+#     - server_name: legacy-app.gxp.example.internal
+#       mode: proxy
+#       proxy_pass: "http://legacy-app.gxp.example.internal:8080"
+nginx_vhosts: []

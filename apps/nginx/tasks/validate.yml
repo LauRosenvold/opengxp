@@ -1,0 +1,56 @@
+---
+- name: Fail loudly if any vhost is missing a server_name
+  ansible.builtin.assert:
+    that:
+      - item.server_name | default('') | length > 0
+    fail_msg: >-
+      Every entry in nginx_vhosts needs a server_name — check the entry
+      rendering as {{ item }}.
+  loop: "{{ nginx_vhosts }}"
+  loop_control:
+    label: "{{ item.server_name | default('(missing server_name)') }}"
+
+- name: Fail loudly if any vhost has an invalid or missing mode
+  ansible.builtin.assert:
+    that:
+      - item.mode | default('') in ['static', 'proxy']
+    fail_msg: >-
+      nginx_vhosts entry "{{ item.server_name }}" has mode
+      "{{ item.mode | default('(missing)') }}" — must be "static" or
+      "proxy".
+  loop: "{{ nginx_vhosts }}"
+  loop_control:
+    label: "{{ item.server_name | default('(missing server_name)') }}"
+
+- name: Fail loudly if a static vhost is missing content_subdir
+  ansible.builtin.assert:
+    that:
+      - item.content_subdir | default('') | length > 0
+    fail_msg: >-
+      nginx_vhosts entry "{{ item.server_name }}" has mode: static but
+      no content_subdir set.
+  loop: "{{ nginx_vhosts }}"
+  loop_control:
+    label: "{{ item.server_name | default('(missing server_name)') }}"
+  when: item.mode | default('') == 'static'
+
+- name: Fail loudly if a proxy vhost is missing proxy_pass
+  ansible.builtin.assert:
+    that:
+      - item.proxy_pass | default('') | length > 0
+    fail_msg: >-
+      nginx_vhosts entry "{{ item.server_name }}" has mode: proxy but no
+      proxy_pass set.
+  loop: "{{ nginx_vhosts }}"
+  loop_control:
+    label: "{{ item.server_name | default('(missing server_name)') }}"
+  when: item.mode | default('') == 'proxy'
+
+- name: Fail loudly if two vhosts share the same server_name
+  ansible.builtin.assert:
+    that:
+      - (nginx_vhosts | map(attribute='server_name') | list | unique | length) == (nginx_vhosts | length)
+    fail_msg: >-
+      nginx_vhosts has duplicate server_name entries — nginx would just
+      use whichever server block happens to be defined first, silently
+      ignoring the other(s), which is worse than failing loudly here.

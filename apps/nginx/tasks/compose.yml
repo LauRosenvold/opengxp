@@ -1,0 +1,35 @@
+---
+- name: Render nginx.conf
+  ansible.builtin.template:
+    src: nginx.conf.j2
+    dest: "{{ nginx_app_dir }}/nginx.conf"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart nginx container
+  # Bind-mounted file content, not part of the compose service
+  # definition itself — same reasoning as apps/netbox's nginx.conf,
+  # `docker compose up -d` won't notice this changed on its own.
+
+- name: Render docker-compose.yml
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ nginx_app_dir }}/docker-compose.yml"
+    owner: root
+    group: root
+    mode: "0640"
+
+- name: Pull the image and (re)create the stack to match the rendered config
+  ansible.builtin.command: >
+    docker compose -f {{ nginx_app_dir }}/docker-compose.yml
+    up -d --remove-orphans
+  args:
+    chdir: "{{ nginx_app_dir }}"
+  register: nginx_compose_up
+  # Same best-effort changed_when heuristic as apps/netbox's and
+  # apps/registry's compose tasks — docker compose's own progress output
+  # isn't a stable API to parse precisely.
+  changed_when: >-
+    'Started' in (nginx_compose_up.stdout ~ nginx_compose_up.stderr)
+    or 'Created' in (nginx_compose_up.stdout ~ nginx_compose_up.stderr)
+    or 'Recreated' in (nginx_compose_up.stdout ~ nginx_compose_up.stderr)

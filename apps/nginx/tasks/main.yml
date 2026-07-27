@@ -1,0 +1,20 @@
+---
+# Assumes server_roles/docker_host has already run against this host —
+# this role only deploys the nginx stack on top of an existing, hardened
+# Docker installation. See docs/APPS.md.
+
+- name: Fail loudly up front if the vhost configuration is invalid
+  ansible.builtin.include_tasks: validate.yml
+  tags: [prep]
+
+- name: Create bind-mounted directories
+  ansible.builtin.include_tasks: directories.yml
+  tags: [prep]
+
+- name: Configure TLS
+  ansible.builtin.include_tasks: tls.yml
+  tags: [prep]
+
+- name: Render and deploy the compose stack
+  ansible.builtin.include_tasks: compose.yml
+  tags: [compose]

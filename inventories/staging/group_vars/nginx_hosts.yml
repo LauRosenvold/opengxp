@@ -1,0 +1,32 @@
+---
+# CANONICAL COPY LIVES IN inventories/production/group_vars/nginx_hosts.yml
+# See the note in staging/group_vars/rhel9.yml — same rule applies here.
+#
+# Runs apps/nginx (see playbooks/nginx.yml — NOT part of
+# playbooks/site.yml). Every host here should ALSO be in docker_hosts —
+# see the note in hosts.yml.
+#
+# Zone-wide open within roles/firewalld_baseline's default-deny zone —
+# same documented gap as netbox_hosts/registry_hosts (see docs/APPS.md
+# and docs/SERVER_ROLES.md). Keep in sync with nginx_https_port below if
+# you change it from the default.
+firewalld_rules:
+  - { port: "443/tcp" }
+
+# --- Virtual hosts ---------------------------------------------------------
+# Empty by default (see apps/nginx/defaults/main.yml) — the stack still
+# deploys with just /healthz and a default-deny 444 for everything else.
+# Populate per-vhost, e.g.:
+# nginx_vhosts:
+#   - server_name: docs.gxp.example.internal
+#     mode: static
+#     content_subdir: docs
+#   - server_name: legacy-app.gxp.example.internal
+#     mode: proxy
+#     proxy_pass: "http://legacy-app.gxp.example.internal:8080"
+
+# --- TLS -----------------------------------------------------------------------
+# Self-signed by default (see apps/nginx/defaults/main.yml). Point these
+# at a real CA-issued cert/key before this holds anything real:
+# nginx_ssl_cert_src: "/path/on/control/node/nginx.crt"
+# nginx_ssl_key_src: "/path/on/control/node/nginx.key"

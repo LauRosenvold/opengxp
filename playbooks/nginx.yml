@@ -1,0 +1,19 @@
+---
+# Application deployment, not part of playbooks/site.yml — see
+# docs/APPS.md. Assumes:
+#   1. This host has already been through playbooks/site.yml (hardened).
+#   2. playbooks/docker_host.yml has already run against it (Docker
+#      installed) — every host in nginx_hosts should also be in
+#      docker_hosts.
+#
+# Usage:
+#   ansible-playbook playbooks/nginx.yml \
+#     -i inventories/staging/hosts.yml --check --diff
+
+- name: Deploy standalone nginx
+  hosts: nginx_hosts
+  become: true
+
+  roles:
+    - role: nginx
+      tags: [nginx]

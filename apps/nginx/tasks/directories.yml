@@ -1,0 +1,36 @@
+---
+- name: Ensure the nginx application directory exists
+  ansible.builtin.file:
+    path: "{{ nginx_app_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Ensure the log directory exists
+  ansible.builtin.file:
+    path: "{{ nginx_log_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  # 0755, not 0750: nginx-unprivileged's own non-root UID (not pinned by
+  # this role, see tasks/tls.yml's comment) needs to write here across
+  # the bind mount, same trade-off apps/netbox already accepted for its
+  # TLS material.
+
+- name: Ensure a content subdirectory exists for each static vhost
+  ansible.builtin.file:
+    path: "{{ nginx_content_dir }}/{{ item.content_subdir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop: "{{ nginx_vhosts }}"
+  loop_control:
+    label: "{{ item.server_name | default('(missing server_name)') }}"
+  when: item.mode | default('') == 'static'
+  # Content itself (index.html and friends) is NOT populated by this
+  # role — same "this role deploys the platform, not your content"
+  # posture as apps/netbox not shipping DCIM data. Drop files in here
+  # yourself, or point a separate deployment step at this path.
