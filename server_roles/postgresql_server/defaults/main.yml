@@ -17,6 +17,22 @@
 # here (see docs/SERVER_ROLES.md).
 postgresql_version: "16"
 
+# 15 and every major version forward — open-ended on purpose, unlike
+# server_roles/kubernetes_node's enumerated k8s_supported_versions list.
+# PostgreSQL major upgrades don't break this role's own config/tasks the
+# way kubeadm's config API breaks across Kubernetes minors (every GUC
+# this role sets — listen_addresses, the pgaudit.* settings, wal_level,
+# scram-sha-256 auth, standby.signal-based replication — has been stable
+# since well before PG15 and PGDG's package/path naming convention
+# ("postgresql<N>-server", "/usr/pgsql-<N>", pgaudit_<N>) has held for
+# every major version to date), so a hard ceiling here would just be
+# false precision. tasks/main.yml fails loudly if postgresql_version is
+# numerically below this floor; there is no upper bound to enumerate.
+# Bumping the floor itself (e.g. dropping 15 once it's EOL upstream) is
+# a deliberate, reviewed change, same posture as this repo's other
+# version-support decisions.
+postgresql_min_supported_version: "15"
+
 # --- Package source ------------------------------------------------------------
 # Same Satellite-first posture as the other server_roles: sync PGDG into
 # a Satellite custom product/content view for a real estate; the public
@@ -79,7 +95,15 @@ postgresql_ssl_self_signed_days: 825   # ~27 months; re-generate before this exp
 # before relying on this verbatim, same caveat as every other hardening
 # default list in this repo.
 postgresql_pgaudit_enabled: true
-postgresql_pgaudit_package: "pgaudit_{{ postgresql_version }}"   # verify this package name against your PGDG repo — pgaudit's RPM naming has varied
+# "pgaudit_<N>" has held across every PGDG-supported major version to
+# date, but pgaudit itself only ships a build for each PostgreSQL major
+# once its own release catches up — for a brand-new PostgreSQL major
+# (this role's forward-open postgresql_min_supported_version above means
+# postgresql_version can be set to a version newer than this default was
+# validated against), verify the package actually exists in your PGDG
+# repo before relying on it; a missing package fails tasks/repo.yml's
+# install task loudly rather than silently skipping pgAudit.
+postgresql_pgaudit_package: "pgaudit_{{ postgresql_version }}"
 postgresql_pgaudit_log_classes: "ddl, write, role, misc"          # deliberately excludes "read" — full SELECT logging is usually too noisy to be useful; add it back if your risk assessment needs it
 postgresql_pgaudit_log_catalog: false     # cut noise from routine catalog/system queries
 postgresql_pgaudit_log_parameter: true    # log actual bound values, not just query shape — needed to reconstruct WHAT changed for a GxP record, at the cost of parameter values (potentially PII/sensitive) landing in the audit log

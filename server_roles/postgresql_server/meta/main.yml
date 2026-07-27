@@ -2,9 +2,11 @@
 galaxy_info:
   role_name: postgresql_server
   description: >-
-    PostgreSQL database server on PGDG packages (version-selectable),
-    hardened postgresql.conf/pg_hba.conf, pgAudit for GxP SQL-level audit
-    trail, TLS (self-signed default, real cert pluggable), basic
+    PostgreSQL database server on PGDG packages, supporting major
+    version 15 and forward (open-ended, no fixed ceiling — see
+    postgresql_min_supported_version), hardened
+    postgresql.conf/pg_hba.conf, pgAudit for GxP SQL-level audit trail,
+    TLS (self-signed default, real cert pluggable), basic
     primary/replica streaming replication, and WAL archiving as a
     documented backup-mechanism-not-a-solution. Runs against the
     `dbservers` inventory group. Lives in server_roles/, not roles/ — see

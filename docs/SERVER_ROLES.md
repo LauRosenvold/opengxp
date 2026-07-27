@@ -331,6 +331,25 @@ group, which already existed as a functional group for
 `roles/firewalld_baseline` purposes before this role did; it's now
 populated with real PostgreSQL vars instead of a placeholder port.
 
+**Supports major version 15 and every version forward**,
+open-ended — unlike `kubernetes_node`'s enumerated
+`k8s_supported_versions` list, there's no fixed ceiling here
+(`postgresql_min_supported_version` in `defaults/main.yml` is a floor
+only, and `tasks/main.yml` fails loudly if `postgresql_version` is set
+below it). That asymmetry is deliberate, not an oversight: PostgreSQL
+major versions don't break this role's config the way Kubernetes minors
+break kubeadm's own config API — every GUC this role sets
+(`listen_addresses`, the `pgaudit.*` settings, `wal_level`,
+`scram-sha-256` auth, `standby.signal`-based replication) has been
+stable well before PG15, and PGDG's package/path naming convention
+(`postgresql<N>-server`, `/usr/pgsql-<N>`, `pgaudit_<N>`) has held for
+every major to date. The one real forward-compatibility risk is
+`postgresql_pgaudit_package` — pgaudit's own release only catches up to
+a new PostgreSQL major some time after that major ships, so setting
+`postgresql_version` to something newer than what's been validated here
+may hit a package that doesn't exist yet in PGDG; `tasks/repo.yml`'s
+install task fails loudly rather than silently skipping pgAudit if so.
+
 ### Node setup: standalone vs. primary vs. replica
 
 Unlike `k8s_control_plane`/`k8s_workers`, `dbservers` is a flat group

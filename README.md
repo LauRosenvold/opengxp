@@ -98,7 +98,7 @@ see [docs/PKI_DNS.md](docs/PKI_DNS.md)):
 | Calico (CNI) | v3.28.0 | `k8s_cni_manifest_url_by_provider` — validated mid-range, not automatically matched to `k8s_version`; verify/bump for versions toward either end of 1.28-1.34 |
 | Flannel (CNI) | v0.25.5 | same caveat as Calico above |
 | MetalLB | v0.14.8 | off by default, L2 mode only; same "not auto-matched to `k8s_version`" caveat |
-| PostgreSQL (PGDG) | 16 | `postgresql_version` |
+| PostgreSQL (PGDG) | 15+ (open-ended — no fixed ceiling, see `postgresql_min_supported_version`) | `postgresql_version` in `inventories/<env>/group_vars/dbservers.yml` (default `16`); see [docs/SERVER_ROLES.md](docs/SERVER_ROLES.md) for the one forward-compat risk (`postgresql_pgaudit_package`) |
 | Docker CE | latest from the distro-appropriate `docker-ce` repo | not independently version-pinned — tracks whatever that repo currently ships |
 
 **Application container images** (`apps/`):

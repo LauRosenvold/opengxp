@@ -5,6 +5,17 @@
 # the service must be running before any psql-based task (replication
 # role creation, pgaudit) can do anything.
 
+- name: Fail loudly if postgresql_version is below the floor this role supports
+  ansible.builtin.assert:
+    that:
+      - postgresql_version is version(postgresql_min_supported_version, '>=')
+    fail_msg: >-
+      postgresql_version is "{{ postgresql_version }}", below
+      postgresql_min_supported_version
+      ("{{ postgresql_min_supported_version }}") — see defaults/main.yml.
+      Older majors aren't validated against this role's GUCs/pg_hba
+      syntax/replication mechanism (standby.signal-based, PG12+).
+
 - name: Install PostgreSQL packages
   ansible.builtin.include_tasks: repo.yml
   tags: [prep]
