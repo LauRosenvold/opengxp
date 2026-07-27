@@ -1,0 +1,151 @@
+---
+# Generates a new SSH keypair for automation_user_name on the control
+# node — the "stage" step of the two-step rotation process
+# docs/CHANGE_CONTROL.md and roles/automation_user/defaults/main.yml
+# already require. See docs/AUTOMATION_USER_KEY_ROTATION.md for the full
+# runbook (stage -> verify -> finalize); this playbook only does the
+# first step and hands you a reviewable public key plus the exact
+# group_vars snippet to add.
+#
+# The private key is generated on, and stays on, the control node —
+# never committed (artifacts/**/*.key is already excluded by
+# .gitignore's blanket *.key rule), never copied anywhere by this
+# playbook. Only the public key (not secret) is meant to leave this
+# host, by you pasting it into a reviewed group_vars change.
+#
+# Requires `ssh-keygen` on the control node (part of any normal OpenSSH
+# client install — no extra collection/library dependency, same "shell
+# out to the standard CLI tool" idiom this repo already uses for
+# self-signed certs in apps/netbox, apps/registry, and
+# provisioning/certificate_enrollment).
+#
+# Usage:
+#   ansible-playbook playbooks/rotate_automation_user_key.yml \
+#     -e automation_user_rotation_key_label=svc_ansible-2026-07-27
+#
+# automation_user_rotation_key_label becomes both the output
+# subdirectory name and the new key's OpenSSH comment field — pick
+# something that tells a future reader which environment/date/ticket
+# this key belongs to. Deliberately required, not auto-generated from a
+# timestamp — same "explicit, not silently guessed" posture this repo
+# already takes with e.g. Proxmox VMIDs (see
+# provisioning/vm_provision/tasks/proxmox.yml).
+
+- name: Generate a new automation_user SSH keypair
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    automation_user_rotation_key_label: "CHANGEME"
+    automation_user_rotation_key_type: ed25519
+    automation_user_rotation_output_dir: "{{ playbook_dir }}/../artifacts/automation_user_keys"
+    # Empty (default) = no passphrase, since this key is meant for
+    # unattended playbook runs (CI runner, bastion cron) — the private
+    # key FILE's own filesystem permissions and control-node access
+    # controls are the protection, same trust model
+    # roles/automation_user's own password_lock/key-only design already
+    # accepts for the account this key authenticates as. Set one only if
+    # a human, not automation, will be the one using this specific
+    # keypair.
+    automation_user_rotation_key_passphrase: ""
+
+  tasks:
+    - name: Fail loudly if no key label was supplied
+      ansible.builtin.assert:
+        that:
+          - automation_user_rotation_key_label != 'CHANGEME'
+        fail_msg: >-
+          automation_user_rotation_key_label is still the CHANGEME
+          placeholder — set it via -e to something that identifies this
+          key (environment, date, change ticket), e.g.
+          svc_ansible-2026-07-27.
+
+    - name: Ensure the output directory exists
+      ansible.builtin.file:
+        path: "{{ automation_user_rotation_output_dir }}/{{ automation_user_rotation_key_label }}"
+        state: directory
+        mode: "0700"
+
+    - name: Check whether a key with this label already exists
+      ansible.builtin.stat:
+        path: "{{ automation_user_rotation_output_dir }}/{{ automation_user_rotation_key_label }}/id_{{ automation_user_rotation_key_type }}.key"
+      register: automation_user_rotation_existing_key
+
+    - name: Fail loudly rather than silently overwrite an existing generated key
+      ansible.builtin.assert:
+        that:
+          - not automation_user_rotation_existing_key.stat.exists
+        fail_msg: >-
+          {{ automation_user_rotation_output_dir }}/{{ automation_user_rotation_key_label }}
+          already has a generated key. Pick a different, still-unique
+          automation_user_rotation_key_label (this is deliberate — silently
+          regenerating a keypair a previous stage step already handed to
+          someone would invalidate it without warning).
+
+    - name: Generate the keypair
+      ansible.builtin.command: >
+        ssh-keygen -t {{ automation_user_rotation_key_type }}
+        -f {{ automation_user_rotation_output_dir }}/{{ automation_user_rotation_key_label }}/id_{{ automation_user_rotation_key_type }}.key
+        -C "{{ automation_user_rotation_key_label }}"
+        -N "{{ automation_user_rotation_key_passphrase }}"
+      changed_when: true
+
+    - name: Restrict the private key's permissions
+      ansible.builtin.file:
+        path: "{{ automation_user_rotation_output_dir }}/{{ automation_user_rotation_key_label }}/id_{{ automation_user_rotation_key_type }}.key"
+        mode: "0600"
+
+    - name: Read the generated public key back
+      ansible.builtin.slurp:
+        src: "{{ automation_user_rotation_output_dir }}/{{ automation_user_rotation_key_label }}/id_{{ automation_user_rotation_key_type }}.key.pub"
+      register: automation_user_rotation_pubkey_raw
+
+    - name: Write a reviewable summary (NOT applied to any inventory automatically)
+      ansible.builtin.copy:
+        dest: "{{ automation_user_rotation_output_dir }}/{{ automation_user_rotation_key_label }}/README.txt"
+        content: |
+          Generated by playbooks/rotate_automation_user_key.yml — this is
+          stage 1 of 3. See docs/AUTOMATION_USER_KEY_ROTATION.md for the
+          full runbook. Nothing here is applied to any inventory or
+          group_vars automatically — that stays a deliberate, reviewed
+          PR, same posture as every other generated-credential output in
+          this repo (provisioning/vm_provision, provisioning/
+          certificate_enrollment).
+
+          private key (NEVER commit, already .gitignore'd via *.key):
+            {{ automation_user_rotation_output_dir }}/{{ automation_user_rotation_key_label }}/id_{{ automation_user_rotation_key_type }}.key
+
+          public key (safe to commit — this exact line):
+            {{ automation_user_rotation_pubkey_raw.content | b64decode | trim }}
+
+          --- Stage 2 of 3: add it alongside the existing key(s) ---
+          Add this line to automation_user_ssh_public_keys in
+          inventories/<env>/group_vars/all.yml, ALONGSIDE the current
+          key(s) — do not remove anything yet:
+
+            automation_user_ssh_public_keys:
+              - "<existing key(s), unchanged>"
+              - "{{ automation_user_rotation_pubkey_raw.content | b64decode | trim }}"
+
+          Open a normal reviewed PR for this change (see
+          docs/CHANGE_CONTROL.md), merge it, then run
+          playbooks/site.yml (or playbooks/bootstrap.yml) against the
+          target environment as usual — this authorizes the new key
+          WITHOUT removing the old one yet.
+
+          --- Stage 3: verify, then finalize ---
+          Run playbooks/verify_automation_user_key.yml with this
+          playbook's generated private key to confirm it actually works
+          BEFORE removing the old key. See
+          docs/AUTOMATION_USER_KEY_ROTATION.md for that command and the
+          finalize step (removing the old key in a follow-up PR).
+        mode: "0640"
+
+    - name: Report where the output landed
+      ansible.builtin.debug:
+        msg: >-
+          New {{ automation_user_rotation_key_type }} keypair generated
+          in
+          {{ automation_user_rotation_output_dir }}/{{ automation_user_rotation_key_label }}/
+          — see that directory's README.txt for the exact next steps
+          (docs/AUTOMATION_USER_KEY_ROTATION.md has the full runbook).

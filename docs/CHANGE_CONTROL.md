@@ -51,6 +51,12 @@ Treat it like any other production change:
   key in a follow-up change. Never ship both in one step (see the warning
   in `roles/automation_user/defaults/main.yml` about `exclusive: true`
   locking every playbook out at once if you get this wrong).
+  `playbooks/rotate_automation_user_key.yml` and
+  `playbooks/verify_automation_user_key.yml` are tooling for this
+  process (key generation, then automated proof the new key actually
+  works before the old one is removed) — see
+  `docs/AUTOMATION_USER_KEY_ROTATION.md` for the full three-stage
+  runbook.
 - This is the one workflow in the repo that connects as something other
   than `automation_user_name` — never let that initial admin credential
   become a standing, reusable "just SSH in as root" habit. It's for this

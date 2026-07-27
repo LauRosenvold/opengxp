@@ -1,0 +1,75 @@
+---
+# Verifies a SPECIFIC SSH private key actually authenticates as
+# automation_user_name and can sudo, against whichever hosts you target —
+# the automated version of the "confirming a run succeeds using it" step
+# docs/AUTOMATION_USER_KEY_ROTATION.md's rotation runbook requires before
+# an old key gets removed. Stage 2 of that runbook's 3 stages.
+#
+# Deliberately does NOT rely on whatever SSH key your own control node's
+# ssh-agent/config would normally offer for these hosts —
+# ansible_ssh_private_key_file below pins the connection to exactly the
+# candidate key you're trying to verify, so a pass here means THAT key
+# specifically works, not "some key worked."
+#
+# --limit is not optional in practice — this connects to every host in
+# the target environment's inventory otherwise, which is rarely what you
+# want mid-rotation (you're usually verifying one host, or one tier, at
+# a time).
+#
+# Usage:
+#   ansible-playbook playbooks/verify_automation_user_key.yml \
+#     -i inventories/staging/hosts.yml --limit app06.gxp.example.internal \
+#     -e automation_user_rotation_verify_key_path=artifacts/automation_user_keys/svc_ansible-2026-07-27/id_ed25519.key
+
+- name: Validate the candidate key file exists locally before attempting to use it
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    automation_user_rotation_verify_key_path: ""
+  tasks:
+    - name: Stat the candidate private key
+      ansible.builtin.stat:
+        path: "{{ automation_user_rotation_verify_key_path }}"
+      register: automation_user_verify_key_stat
+      when: automation_user_rotation_verify_key_path | length > 0
+
+    - name: Fail loudly if the key path is missing or doesn't exist
+      ansible.builtin.assert:
+        that:
+          - automation_user_rotation_verify_key_path | length > 0
+          - automation_user_verify_key_stat.stat.exists | default(false)
+        fail_msg: >-
+          automation_user_rotation_verify_key_path must be set (via -e)
+          to the PRIVATE key file
+          playbooks/rotate_automation_user_key.yml generated, and that
+          file must actually exist at that path.
+
+- name: Verify a candidate automation_user SSH key
+  hosts: all:!hyperv_hosts:!dns_servers:!ca_servers:!localhost
+  gather_facts: false
+  vars:
+    ansible_user: "{{ automation_user_name }}"
+    ansible_ssh_private_key_file: "{{ automation_user_rotation_verify_key_path }}"
+
+  tasks:
+    - name: Confirm SSH key auth as the automation user
+      ansible.builtin.command: whoami
+      register: automation_user_verify_whoami
+      changed_when: false
+
+    - name: Confirm sudo access works too
+      ansible.builtin.command: whoami
+      become: true
+      register: automation_user_verify_sudo_whoami
+      changed_when: false
+
+    - name: Report success for this host
+      ansible.builtin.debug:
+        msg: >-
+          {{ inventory_hostname }}: connected as
+          {{ automation_user_verify_whoami.stdout }}, sudo works
+          (become -> {{ automation_user_verify_sudo_whoami.stdout }}).
+          This key is confirmed good for {{ inventory_hostname }} — see
+          docs/AUTOMATION_USER_KEY_ROTATION.md for the finalize step
+          once every host you need is verified.

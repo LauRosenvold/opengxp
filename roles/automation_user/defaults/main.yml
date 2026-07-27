@@ -32,6 +32,11 @@ automation_user_ssh_public_keys: []
 # the new key here first, confirming a run succeeds using it, THEN
 # removing the old key in a follow-up change — never both in one step,
 # or a mistake locks every playbook out at once.
+# playbooks/rotate_automation_user_key.yml (generates the new keypair)
+# and playbooks/verify_automation_user_key.yml (confirms the new key
+# actually works before you touch the old one) are tooling for exactly
+# this two-step process — see docs/AUTOMATION_USER_KEY_ROTATION.md for
+# the full runbook.
 automation_user_authorized_keys_exclusive: true
 
 # NOPASSWD is a deliberate, documented exception to "always require a

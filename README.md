@@ -86,6 +86,10 @@ environment differs:
   every action captured by `roles/user_access_gxp`'s sudo I/O logging. That
   account has to exist before anything else can run, which is what
   `playbooks/provision_automation_user.yml` is for — see "Usage" below.
+  Rotating its SSH key is a three-stage, change-controlled process with
+  its own tooling (`playbooks/rotate_automation_user_key.yml`,
+  `playbooks/verify_automation_user_key.yml`) — see
+  [docs/AUTOMATION_USER_KEY_ROTATION.md](docs/AUTOMATION_USER_KEY_ROTATION.md).
 - **Workload-enablement roles (Docker, Kubernetes, PostgreSQL, ...) live
   in `server_roles/`, not `roles/`.** Different change-control weight,
   different cadence, not part of `playbooks/site.yml` — see
@@ -171,6 +175,8 @@ inventories/
   validation/                 # IQ/OQ/PQ execution environment (see docs/VALIDATION.md)
 playbooks/
   provision_automation_user.yml # ONE-TIME per host, run before anything else — see "Usage"
+  rotate_automation_user_key.yml # generates a new automation_user SSH keypair — see AUTOMATION_USER_KEY_ROTATION.md
+  verify_automation_user_key.yml # confirms a candidate key works before you retire the old one — see AUTOMATION_USER_KEY_ROTATION.md
   site.yml                    # full build: common -> hardening -> compliance evidence
   bootstrap.yml                # first-boot: automation user + Satellite registration + baseline
   hardening.yml                # security roles only, safe to re-run on a schedule
@@ -225,6 +231,7 @@ molecule/
 docs/
   VALIDATION.md                  # how this repo maps to computerized system validation
   CHANGE_CONTROL.md              # branching/approval model expected around this repo
+  AUTOMATION_USER_KEY_ROTATION.md # three-stage runbook for rotating automation_user_name's SSH key
   BASELINE_MAPPING.md            # CIS control -> role/task cross-reference
   SERVER_ROLES.md                # why server_roles/ is separate from roles/, and per-role specifics
   APPS.md                        # why apps/ is a third tier below server_roles/, plus netbox/registry/nginx specifics
@@ -292,6 +299,31 @@ ansible-playbook playbooks/provision_automation_user.yml \
 From here on, every playbook connects as that account, never root — see
 `roles/automation_user` and the "No playbook ever connects as root"
 assumption above.
+
+**Rotating that account's SSH key later** is a three-stage process — see
+[docs/AUTOMATION_USER_KEY_ROTATION.md](docs/AUTOMATION_USER_KEY_ROTATION.md)
+before using this on anything real (the exclusive-authorized-keys
+lockout risk, and why you switch your own active key before the finalize
+step, not after):
+
+```bash
+# Stage 1 — generate (control node only, private key never leaves it):
+ansible-playbook playbooks/rotate_automation_user_key.yml \
+  -e automation_user_rotation_key_label=svc_ansible-2026-07-27
+
+# ... add the new public key to automation_user_ssh_public_keys
+# alongside the existing one, PR + merge + re-run site.yml/bootstrap.yml
+# using your CURRENT key, then:
+
+# Stage 2 — verify the new key actually works before touching the old one:
+ansible-playbook playbooks/verify_automation_user_key.yml \
+  -i inventories/staging/hosts.yml --limit app06.gxp.example.internal \
+  -e automation_user_rotation_verify_key_path=artifacts/automation_user_keys/svc_ansible-2026-07-27/id_ed25519.key
+
+# Stage 3 — switch your own active key, THEN remove the old one from
+# automation_user_ssh_public_keys in a follow-up PR and re-run
+# site.yml/bootstrap.yml again.
+```
 
 Dry-run against staging first, always:
 
