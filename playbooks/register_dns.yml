@@ -1,0 +1,39 @@
+---
+# Creates (or removes) a forward A record, optional CNAME aliases, and an
+# optional reverse PTR record on the Windows DNS Server(s) in the
+# `dns_servers` inventory group — see docs/PKI_DNS.md. Typically run
+# right after provisioning/vm_provision creates a VM (see
+# docs/PROVISIONING.md's lifecycle diagram) and before
+# playbooks/provision_automation_user.yml, so the new host is resolvable
+# by name for everything that follows.
+#
+# Requires pywinrm on the control node (pip install "pywinrm>=0.3.0") —
+# same control-node prerequisite as playbooks/provision_vm_hyperv.yml.
+#
+# --limit is not optional in practice: `dns_servers` may contain more
+# than one DNS server, and this creates the record via whichever host(s)
+# the play actually targets.
+#
+# Usage:
+#   ansible-playbook playbooks/register_dns.yml \
+#     -i inventories/staging/hosts.yml --limit dns01.gxp.example.internal \
+#     -e dns_registration_zone=gxp.example.internal \
+#     -e dns_registration_record_name=app06 \
+#     -e dns_registration_ip_address=10.20.10.55 \
+#     -e dns_registration_reverse_zone=10.20.10.in-addr.arpa
+#
+# Remove:
+#   ansible-playbook playbooks/register_dns.yml \
+#     -i inventories/staging/hosts.yml --limit dns01.gxp.example.internal \
+#     -e dns_registration_zone=gxp.example.internal \
+#     -e dns_registration_record_name=app06 \
+#     -e dns_registration_ip_address=10.20.10.55 \
+#     -e dns_registration_reverse_zone=10.20.10.in-addr.arpa \
+#     -e dns_registration_state=absent
+
+- name: Register DNS records for a host
+  hosts: dns_servers
+  gather_facts: false
+  roles:
+    - role: dns_registration
+      tags: [dns]

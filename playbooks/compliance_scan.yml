@@ -5,10 +5,11 @@
 # for the periodic-review evidence described in docs/VALIDATION.md.
 
 - name: Generate compliance evidence
-  # !hyperv_hosts: OpenSCAP/oscap here targets RHEL/AlmaLinux content —
-  # not applicable to a WinRM-connected Windows host. !localhost: the
-  # Ansible control node itself. See docs/PROVISIONING.md.
-  hosts: all:!hyperv_hosts:!localhost
+  # !hyperv_hosts / !dns_servers / !ca_servers: OpenSCAP/oscap here
+  # targets RHEL/AlmaLinux content — not applicable to a WinRM-connected
+  # Windows host. !localhost: the Ansible control node itself. See
+  # docs/PROVISIONING.md, docs/PKI_DNS.md.
+  hosts: all:!hyperv_hosts:!dns_servers:!ca_servers:!localhost
   become: true
 
   roles:

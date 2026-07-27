@@ -1,0 +1,44 @@
+---
+# Requests (or revokes) one certificate at a time from the Windows CA
+# (Active Directory Certificate Services) this play is connected to (the
+# `ca_servers` inventory group — see inventories/<env>/group_vars/
+# ca_servers.yml and docs/PKI_DNS.md). certreq/certutil do the actual
+# enrollment work — no dedicated Ansible module for ADCS enrollment
+# exists in community.windows/ansible.windows, and these are Microsoft's
+# own long-standing, documented CLI tools for exactly this.
+
+certificate_enrollment_state: present   # present (request/retrieve) | revoked
+
+# --- Subject / SAN -----------------------------------------------------------
+certificate_enrollment_common_name: "CHANGEME"   # e.g. app06.gxp.example.internal — should match the record created by provisioning/dns_registration
+certificate_enrollment_sans: []                   # extra DNS SANs beyond the common name (e.g. CNAME aliases also registered in DNS)
+certificate_enrollment_key_algorithm: rsa         # passed straight to `openssl req -newkey` — rsa is the only value this role's defaults/docs assume
+certificate_enrollment_key_size: 2048
+
+# --- Windows CA (ADCS) target --------------------------------------------------
+# Exactly as `certutil -dump` / the Certification Authority console shows
+# it: "<CAComputerName>\<CAName>". Verify with `certutil -config -` run
+# on the CA host if unsure.
+certificate_enrollment_ca_config: "CHANGEME"
+# Certificate template NAME (not display name) published for enrollment
+# on that CA — list available templates with `certutil -catemplates` on
+# the CA host.
+certificate_enrollment_template: "WebServer"
+
+# Set this to a pending request's ID (reported when the CA requires
+# manager approval — see tasks/enroll.yml) to retrieve an
+# already-approved certificate instead of submitting a new request.
+certificate_enrollment_request_id: ""
+
+# --- Output --------------------------------------------------------------------
+# Control-node-local only — this role never copies the issued
+# certificate or key to any managed target itself. Point the relevant
+# role's own *_ssl_cert_src / *_ssl_key_src var (apps/netbox,
+# apps/registry, server_roles/postgresql_server) at the files that land
+# here, as a normal reviewed change — same "propose, don't silently
+# chain" posture as provisioning/vm_provision's inventory snippet.
+certificate_enrollment_output_dir: "{{ playbook_dir }}/../artifacts/certificates"
+
+# --- Revocation (certificate_enrollment_state: revoked) ------------------------
+certificate_enrollment_revoke_serial: ""            # CHANGEME — see the issued cert's own .txt summary, or `certutil -view` on the CA
+certificate_enrollment_revoke_reason: "Unspecified" # Unspecified | KeyCompromise | CACompromise | AffiliationChanged | Superseded | CessationOfOperation

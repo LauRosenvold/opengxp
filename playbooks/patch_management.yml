@@ -16,11 +16,12 @@
 # once regardless of tier.
 
 - name: Apply patches within a controlled maintenance window
-  # !hyperv_hosts: dnf-based patching doesn't apply to that (Windows,
-  # WinRM-connected) group — patch the hypervisor host itself via your
-  # normal Windows Update process. !localhost: the Ansible control node
-  # itself. See docs/PROVISIONING.md.
-  hosts: all:!hyperv_hosts:!localhost
+  # !hyperv_hosts / !dns_servers / !ca_servers: dnf-based patching
+  # doesn't apply to any of those (Windows, WinRM-connected) groups —
+  # patch them via your normal Windows Update process instead.
+  # !localhost: the Ansible control node itself. See
+  # docs/PROVISIONING.md, docs/PKI_DNS.md.
+  hosts: all:!hyperv_hosts:!dns_servers:!ca_servers:!localhost
   become: true
   serial: 1
   max_fail_percentage: 0

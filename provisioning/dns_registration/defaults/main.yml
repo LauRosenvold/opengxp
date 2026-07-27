@@ -1,0 +1,33 @@
+---
+# Creates/removes DNS records for one host at a time on the Windows DNS
+# Server this play is connected to (the `dns_servers` inventory group —
+# see inventories/<env>/group_vars/dns_servers.yml and docs/PKI_DNS.md).
+# Uses community.windows.win_dns_record rather than a hand-rolled
+# PowerShell script — verify its exact parameter set against the
+# community.windows version actually installed (see requirements.yml)
+# before relying on this in production, same posture as this repo takes
+# with every other third-party-content version dependency.
+
+dns_registration_state: present   # present | absent — absent still requires dns_registration_ip_address, see below
+
+# --- Forward record --------------------------------------------------------
+dns_registration_zone: "CHANGEME"          # e.g. gxp.example.internal — the forward DNS zone to create the record in
+dns_registration_record_name: "CHANGEME"    # short hostname, no domain suffix, e.g. "app06"
+dns_registration_ip_address: "CHANGEME"     # required for BOTH present and absent — the PTR record name is derived from it, see tasks/main.yml
+dns_registration_ttl: 3600
+
+# Optional CNAME aliases pointing at
+# {{ dns_registration_record_name }}.{{ dns_registration_zone }} — e.g. a
+# service name that should resolve to this host regardless of what its
+# real hostname is.
+dns_registration_aliases: []
+
+# --- Reverse (PTR) record ---------------------------------------------------
+# Only handles a classful (/24-aligned) IPv4 reverse zone, where the PTR
+# record's own name is just the address's last octet — the common case
+# for a single-site GxP estate. A classless (RFC 2317) delegated reverse
+# zone or IPv6 PTR needs a differently-shaped zone/name pair, which this
+# role does not attempt to derive for you — set dns_registration_create_ptr
+# to false and manage that record another way instead.
+dns_registration_create_ptr: true
+dns_registration_reverse_zone: ""           # CHANGEME if create_ptr is true — e.g. "10.20.10.in-addr.arpa"

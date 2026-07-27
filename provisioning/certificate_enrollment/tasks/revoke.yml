@@ -1,0 +1,31 @@
+---
+- name: Fail loudly if the serial to revoke wasn't supplied
+  ansible.builtin.assert:
+    that:
+      - certificate_enrollment_revoke_serial | length > 0
+    fail_msg: >-
+      certificate_enrollment_state is 'revoked' but
+      certificate_enrollment_revoke_serial is empty — see the issued
+      certificate's own .txt summary in
+      {{ certificate_enrollment_output_dir }}, or `certutil -view` on the
+      CA, for the serial number.
+
+- name: Revoke the certificate on the CA
+  ansible.windows.win_shell: >
+    certutil -config "{{ certificate_enrollment_ca_config }}"
+    -revoke {{ certificate_enrollment_revoke_serial }} {{ certificate_enrollment_revoke_reason }}
+  register: certificate_enrollment_revoke_result
+  changed_when: certificate_enrollment_revoke_result.rc == 0
+
+- name: Report revocation status
+  ansible.builtin.debug:
+    msg: "{{ certificate_enrollment_revoke_result.stdout_lines }}"
+
+- name: Publish a new CRL so the revocation actually takes effect
+  ansible.windows.win_shell: certutil -crl
+  changed_when: true
+  # Revoking a certificate marks it in the CA database immediately, but
+  # relying parties only see it once a new CRL (or the OCSP responder, if
+  # you run one) is actually published — the step a manual "just revoke
+  # it" runbook most often forgets. Cheap enough to run unconditionally
+  # rather than trying to detect whether it was actually needed.

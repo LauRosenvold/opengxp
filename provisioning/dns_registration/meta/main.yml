@@ -1,0 +1,16 @@
+---
+galaxy_info:
+  role_name: dns_registration
+  description: >-
+    Creates/removes a forward (A), optional CNAME alias, and optional
+    reverse (PTR) record on a Windows DNS Server (AD-integrated or
+    standalone) over WinRM. Lives in provisioning/, not roles/ — see
+    docs/PKI_DNS.md.
+  license: Apache-2.0
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Windows
+      versions:
+        - "2019"
+        - "2022"
+dependencies: []

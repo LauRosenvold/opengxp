@@ -1,0 +1,22 @@
+---
+# Dispatches purely on certificate_enrollment_state — same "explicit at
+# the play/extra-vars level, no silent default" posture as
+# provisioning/vm_provision's provisioning_hypervisor dispatch.
+
+- name: Fail loudly if required vars are still at their CHANGEME placeholder
+  ansible.builtin.assert:
+    that:
+      - certificate_enrollment_common_name != 'CHANGEME'
+      - certificate_enrollment_ca_config != 'CHANGEME'
+    fail_msg: >-
+      certificate_enrollment_common_name and
+      certificate_enrollment_ca_config must both be set — see
+      provisioning/certificate_enrollment/defaults/main.yml.
+
+- name: Request (or retrieve a pending) certificate
+  ansible.builtin.include_tasks: enroll.yml
+  when: certificate_enrollment_state == 'present'
+
+- name: Revoke a previously issued certificate
+  ansible.builtin.include_tasks: revoke.yml
+  when: certificate_enrollment_state == 'revoked'

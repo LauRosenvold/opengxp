@@ -30,7 +30,7 @@
 # what makes only the gated grow task run.
 
 - name: Grow an LVM logical volume and its filesystem
-  hosts: all:!hyperv_hosts:!localhost
+  hosts: all:!hyperv_hosts:!dns_servers:!ca_servers:!localhost
   become: true
   serial: 1
 

@@ -1,0 +1,28 @@
+---
+# CANONICAL COPY LIVES IN inventories/production/group_vars/ca_servers.yml
+# This is the IQ/OQ/PQ execution environment (see docs/VALIDATION.md) —
+# it must match production control policy exactly.
+#
+# Overrides the `all:vars:` block in hosts.yml — same reasoning as
+# inventories/production/group_vars/hyperv_hosts.yml.
+ansible_connection: winrm
+ansible_port: 5986
+ansible_winrm_transport: ntlm
+# Kerberos is the better choice once you're already running AD elsewhere
+# in this estate (see docs/IDENTITY.md) — Kerberos also happens to be
+# what certreq itself uses under the hood to authenticate the enrollment
+# request to the CA, so using it here for WinRM too keeps the auth model
+# consistent end to end.
+ansible_winrm_server_cert_validation: validate
+# "ignore" is for a known lab WinRM listener using a self-signed cert
+# only — same posture as every other TLS default in this repo.
+
+# Vaulted — an account that's allowed to both WinRM into this host AND
+# enroll against the certificate template(s)
+# provisioning/certificate_enrollment targets (Read + Enroll permissions
+# on the template in the CA's Certificate Templates console — Certificate
+# Managers/Domain Admin work but are more than this strictly needs). No
+# default: an empty ansible_password just fails the connection outright,
+# which is the correct "fail loud" behavior here.
+ansible_user: "CHANGEME"
+ansible_password: ""

@@ -130,6 +130,17 @@ environment differs:
   [docs/PROVISIONING.md](docs/PROVISIONING.md), including why several
   existing `hosts: all` playbooks changed to exclude `hyperv_hosts` and
   `localhost`.
+- **DNS records and Windows-PKI certificates (`provisioning/dns_registration`,
+  `provisioning/certificate_enrollment`) connect to Windows over WinRM,
+  same as `vm_provision`'s Hyper-V path** — `win_dns_record` for DNS,
+  `certreq`/`certutil` for requesting and revoking certificates from an
+  internal Active Directory Certificate Services CA. The private key
+  never leaves the control node; only the CSR and the issued certificate
+  cross the wire. Neither role deploys its output anywhere automatically
+  — point the relevant app/role's own `*_ssl_cert_src`/`*_ssl_key_src`
+  var at the fetched files yourself. See [docs/PKI_DNS.md](docs/PKI_DNS.md),
+  including why WinRM was chosen over a Linux-native alternative (dynamic
+  DNS updates, ADCS's web enrollment service) for both.
 - **LVM, application and data on their own volumes, fleet-wide.**
   `roles/lvm_storage` builds a volume group on a dedicated additional
   disk (exactly what `provisioning/vm_provision`'s `vm_extra_disk_gb`
@@ -165,6 +176,8 @@ playbooks/
   registry.yml                 # application deployment, NOT part of site.yml — see APPS.md
   provision_vm_vcenter.yml     # creates a VM from a vCenter template — runs BEFORE any of the above, see PROVISIONING.md
   provision_vm_hyperv.yml      # creates a VM from a Hyper-V template — runs BEFORE any of the above, see PROVISIONING.md
+  register_dns.yml             # creates/removes DNS records on a Windows DNS Server — see PKI_DNS.md
+  request_certificate.yml      # requests/revokes a certificate from a Windows CA (ADCS) — see PKI_DNS.md
   lvm_storage_grow.yml         # explicitly-gated LV/filesystem grow, --tags grow required
 roles/
   automation_user/            # dedicated non-root local account every playbook connects as
@@ -194,6 +207,8 @@ apps/                           # application deployments on top of server_roles
   registry/                       # Private Docker/OCI registry: native TLS, mandatory htpasswd auth, immutable images by default
 provisioning/                   # creates the VM itself, before any tier above applies — see PROVISIONING.md
   vm_provision/                    # vCenter (community.vmware) or Hyper-V (ansible.windows + PowerShell), clone from template
+  dns_registration/                # Windows DNS Server A/CNAME/PTR records via WinRM — see PKI_DNS.md
+  certificate_enrollment/          # Windows CA (ADCS) certificate request/revoke via certreq/certutil over WinRM — see PKI_DNS.md
 molecule/
   ssh_hardening/                 # example molecule scenario — pattern to replicate per role
 docs/
@@ -204,6 +219,7 @@ docs/
   APPS.md                        # why apps/ is a third tier below server_roles/, plus netbox/registry specifics
   IDENTITY.md                    # AD/IdM join, SSH/sudo group mapping, ID mapping choice, GSSAPI SSH
   PROVISIONING.md                # why provisioning/ runs before every other tier, vCenter/Hyper-V specifics
+  PKI_DNS.md                     # DNS record + Windows-PKI certificate provisioning, why WinRM was chosen
   STORAGE.md                     # fleet-wide LVM layout, safety checks, growing a volume, adding workload-specific mounts
 ```
 
@@ -228,6 +244,20 @@ ansible-playbook playbooks/provision_vm_vcenter.yml -i inventories/staging/hosts
 ansible-playbook playbooks/provision_vm_hyperv.yml -i inventories/staging/hosts.yml \
   --limit hyperv01.gxp.example.internal -e vm_name=app07 \
   -e hyperv_template_export_path='D:\HyperV\Templates\rhel9-golden'
+```
+
+**Give the new host a DNS name** before doing anything else with it —
+see [docs/PKI_DNS.md](docs/PKI_DNS.md) for the PTR-record caveat and why
+this connects to a Windows DNS Server over WinRM rather than something
+Linux-native:
+
+```bash
+ansible-playbook playbooks/register_dns.yml -i inventories/staging/hosts.yml \
+  --limit dns01.gxp.example.internal \
+  -e dns_registration_zone=gxp.example.internal \
+  -e dns_registration_record_name=app06 \
+  -e dns_registration_ip_address=10.20.10.55 \
+  -e dns_registration_reverse_zone=10.20.10.in-addr.arpa
 ```
 
 **First, once per newly provisioned host:** populate
@@ -320,6 +350,20 @@ immutable by default):
 
 ```bash
 ansible-playbook playbooks/registry.yml -i inventories/staging/hosts.yml --check --diff
+```
+
+Request a TLS certificate from an internal Windows CA (ADCS) for
+whichever of the above needs one — see
+[docs/PKI_DNS.md](docs/PKI_DNS.md) for the manager-approval-pending
+workflow and how to plug the result into `netbox_ssl_cert_src`/
+`registry_ssl_cert_src`/`postgresql_ssl_cert_src`:
+
+```bash
+ansible-playbook playbooks/request_certificate.yml -i inventories/staging/hosts.yml \
+  --limit ca01.gxp.example.internal \
+  -e certificate_enrollment_common_name=app06.gxp.example.internal \
+  -e certificate_enrollment_ca_config='ca01\GxP-Enterprise-Issuing-CA' \
+  -e certificate_enrollment_template=WebServer
 ```
 
 Grow an existing LVM volume (explicitly gated — read

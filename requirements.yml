@@ -27,6 +27,14 @@ collections:
     version: "4.5.0"
   - name: ansible.windows
     version: "2.4.0"
+  # community.windows.win_dns_record (provisioning/dns_registration) —
+  # same control-node pywinrm prerequisite as ansible.windows above, no
+  # additional Python library needed for this one specifically. Pin
+  # verified against the module's actual parameter set on whichever
+  # version you land on before relying on it in production — see
+  # provisioning/dns_registration/defaults/main.yml's note.
+  - name: community.windows
+    version: "2.3.0"
 
 roles:
   # CIS Benchmark automation, maintained by ansible-lockdown.

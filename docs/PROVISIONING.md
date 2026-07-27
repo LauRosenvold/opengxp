@@ -27,10 +27,19 @@ any of the existing tiers:
 - Its output feeds the *start* of the lifecycle every other tier assumes
   already happened, not a step within it.
 
+Two more roles share this tier for the same reason —
+`provisioning/dns_registration` and `provisioning/certificate_enrollment`
+also target infrastructure that isn't the managed host itself (a Windows
+DNS Server, a Windows CA), over the same WinRM connection model this
+role established for Hyper-V. See [PKI_DNS.md](PKI_DNS.md) for both.
+
 ## The full lifecycle
 
 ```
 provisioning/vm_provision          create the VM (vCenter or Hyper-V)
+        |
+        v
+provisioning/dns_registration       give it a resolvable DNS name (see PKI_DNS.md)
         |
         v
 playbooks/provision_automation_user.yml   one-time: create svc_ansible (roles/automation_user)
@@ -43,6 +52,9 @@ server_roles/ playbooks             docker_host, kubernetes_node, postgresql_ser
         |
         v
 apps/ playbooks                     netbox, registry, ...
+        |
+        v
+provisioning/certificate_enrollment  request a Windows-PKI cert once something needs TLS (see PKI_DNS.md)
 ```
 
 Nothing here runs the next step automatically — same "propose, don't
@@ -140,12 +152,14 @@ handling doesn't reliably guarantee.
 
 **This has a consequence for every existing `hosts: all` playbook**:
 `bootstrap.yml`, `hardening.yml`, `compliance_scan.yml`,
-`patch_management.yml`, and `provision_automation_user.yml` were all
-updated to `hosts: all:!hyperv_hosts:!localhost` — otherwise those plays
-would now also try to CIS-harden, Satellite-register, or AD-join
-whatever machine happens to be running `ansible-playbook`, which is
-obviously wrong. If you add a new `hosts: all` playbook to this repo
-later, remember both exclusions.
+`patch_management.yml`, `lvm_storage_grow.yml`, and
+`provision_automation_user.yml` were all updated to
+`hosts: all:!hyperv_hosts:!dns_servers:!ca_servers:!localhost` —
+otherwise those plays would now also try to CIS-harden,
+Satellite-register, or AD-join whatever machine happens to be running
+`ansible-playbook`, or any Windows DNS/CA server in inventory (see
+[PKI_DNS.md](PKI_DNS.md)), which is obviously wrong. If you add a new
+`hosts: all` playbook to this repo later, remember all four exclusions.
 
 ## What's intentionally out of scope
 
@@ -162,10 +176,13 @@ later, remember both exclusions.
 - **Automatic inventory registration** — see "The full lifecycle" above;
   folding a newly created host into the checked-in inventory is a
   deliberate, separate, reviewed change.
-- **DHCP reservation management, DNS record creation** — `vm_provision`
-  can set a static MAC (Hyper-V) or static IP via guest customization
-  (vCenter), but reserving that address in DHCP or creating the matching
-  DNS record is your network infrastructure's job, not this role's.
+- **DHCP reservation management** — `vm_provision` can set a static MAC
+  (Hyper-V) or static IP via guest customization (vCenter), but reserving
+  that address in DHCP is your network infrastructure's job, not this
+  role's. **DNS record creation and certificate issuance** used to be
+  listed here too, but are now covered by
+  `provisioning/dns_registration` and `provisioning/certificate_enrollment`
+  — see [PKI_DNS.md](PKI_DNS.md).
 - **Multi-VM/bulk provisioning orchestration** (spinning up N identical
   VMs, e.g. for a Kubernetes cluster's worker nodes, in one invocation) —
   this role provisions one VM per run; looping it (via `-e vm_name=...`

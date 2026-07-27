@@ -1,0 +1,31 @@
+---
+# CANONICAL COPY LIVES IN inventories/production/group_vars/dns_servers.yml
+# See the note in staging/group_vars/rhel9.yml — same rule applies here.
+#
+# Overrides the `all:vars:` block in hosts.yml (ansible_user: svc_ansible,
+# ansible_become: true) — those are SSH/sudo concepts that don't apply to
+# a Windows host. Same reasoning as
+# inventories/production/group_vars/hyperv_hosts.yml — this is what makes
+# the `:!dns_servers` exclusion in the core playbooks meaningful rather
+# than just documentation.
+ansible_connection: winrm
+ansible_port: 5986
+ansible_winrm_transport: ntlm
+# Kerberos is the better choice once this DNS server is domain-joined —
+# it almost always is, since "Windows DNS Server" here typically means
+# AD-integrated DNS on a domain controller or member server (see
+# docs/PKI_DNS.md) — and you're already running AD elsewhere in this
+# estate (see docs/IDENTITY.md). Set to "kerberos" and add the matching
+# ansible_winrm_* realm vars if so.
+ansible_winrm_server_cert_validation: validate
+# "ignore" is for a known lab WinRM listener using a self-signed cert
+# only — same posture as every other TLS default in this repo.
+
+# Vaulted — an account with rights to manage DNS records in the zone(s)
+# provisioning/dns_registration targets (DnsAdmins group membership, or
+# an equivalent delegated permission, is enough — full Domain Admin is
+# more than this needs). No default: an empty ansible_password just
+# fails the connection outright, which is the correct "fail loud"
+# behavior here.
+ansible_user: "CHANGEME"
+ansible_password: ""

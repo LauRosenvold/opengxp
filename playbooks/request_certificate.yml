@@ -1,0 +1,46 @@
+---
+# Requests (or revokes) a TLS certificate from an internal Windows CA
+# (Active Directory Certificate Services) for a host in this estate — see
+# docs/PKI_DNS.md. The private key and CSR are generated on the control
+# node and never leave it; only the CSR (public by design) is copied to
+# the CA host in the `ca_servers` inventory group over WinRM, and only
+# the issued certificate is copied back. Typically run after
+# playbooks/register_dns.yml, using the same DNS name
+# (dns_registration_record_name.dns_registration_zone) as
+# certificate_enrollment_common_name, so the cert's CN/SAN actually
+# resolves.
+#
+# Requires pywinrm on the control node, and openssl on the control node
+# (used to generate the private key/CSR locally — see
+# provisioning/certificate_enrollment/defaults/main.yml).
+#
+# --limit is not optional in practice, same reasoning as
+# register_dns.yml.
+#
+# Usage:
+#   ansible-playbook playbooks/request_certificate.yml \
+#     -i inventories/staging/hosts.yml --limit ca01.gxp.example.internal \
+#     -e certificate_enrollment_common_name=app06.gxp.example.internal \
+#     -e certificate_enrollment_ca_config='ca01\GxP-Enterprise-Issuing-CA' \
+#     -e certificate_enrollment_template=WebServer
+#
+# Retrieve a certificate that was pending manager approval:
+#   ansible-playbook playbooks/request_certificate.yml \
+#     -i inventories/staging/hosts.yml --limit ca01.gxp.example.internal \
+#     -e certificate_enrollment_common_name=app06.gxp.example.internal \
+#     -e certificate_enrollment_ca_config='ca01\GxP-Enterprise-Issuing-CA' \
+#     -e certificate_enrollment_request_id=1234
+#
+# Revoke:
+#   ansible-playbook playbooks/request_certificate.yml \
+#     -i inventories/staging/hosts.yml --limit ca01.gxp.example.internal \
+#     -e certificate_enrollment_ca_config='ca01\GxP-Enterprise-Issuing-CA' \
+#     -e certificate_enrollment_state=revoked \
+#     -e certificate_enrollment_revoke_serial=1a2b3c4d5e
+
+- name: Request or revoke a certificate from the internal Windows CA
+  hosts: ca_servers
+  gather_facts: false
+  roles:
+    - role: certificate_enrollment
+      tags: [pki, certificate]

@@ -1,0 +1,58 @@
+---
+# Runs on the Windows DNS Server itself, connected via WinRM (see
+# playbooks/register_dns.yml and inventories/<env>/group_vars/
+# dns_servers.yml) — community.windows.win_dns_record does the actual
+# work against the local DNS Server service.
+
+- name: Fail loudly if required vars are still at their CHANGEME placeholder
+  ansible.builtin.assert:
+    that:
+      - dns_registration_zone != 'CHANGEME'
+      - dns_registration_record_name != 'CHANGEME'
+      - dns_registration_ip_address != 'CHANGEME'
+    fail_msg: >-
+      dns_registration_zone, dns_registration_record_name, and
+      dns_registration_ip_address must all be set (the IP is required even
+      when removing a record, since the PTR record name is derived from
+      it) — see provisioning/dns_registration/defaults/main.yml.
+
+- name: Create/remove the forward (A) record
+  community.windows.win_dns_record:
+    name: "{{ dns_registration_record_name }}"
+    zone: "{{ dns_registration_zone }}"
+    type: A
+    value: "{{ dns_registration_ip_address }}"
+    ttl: "{{ dns_registration_ttl }}"
+    state: "{{ dns_registration_state }}"
+
+- name: Create/remove CNAME aliases pointing at the A record
+  community.windows.win_dns_record:
+    name: "{{ item }}"
+    zone: "{{ dns_registration_zone }}"
+    type: CNAME
+    value: "{{ dns_registration_record_name }}.{{ dns_registration_zone }}."
+    ttl: "{{ dns_registration_ttl }}"
+    state: "{{ dns_registration_state }}"
+  loop: "{{ dns_registration_aliases }}"
+
+- name: Create/remove the reverse (PTR) record
+  when: dns_registration_create_ptr
+  block:
+    - name: Assert the reverse zone is set when PTR management is requested
+      ansible.builtin.assert:
+        that:
+          - dns_registration_reverse_zone | length > 0
+        fail_msg: >-
+          dns_registration_create_ptr is true but
+          dns_registration_reverse_zone is empty — set it (e.g.
+          "10.20.10.in-addr.arpa") or set dns_registration_create_ptr:
+          false.
+
+    - name: Create/remove the PTR record
+      community.windows.win_dns_record:
+        name: "{{ dns_registration_ip_address.split('.')[3] }}"
+        zone: "{{ dns_registration_reverse_zone }}"
+        type: PTR
+        value: "{{ dns_registration_record_name }}.{{ dns_registration_zone }}."
+        ttl: "{{ dns_registration_ttl }}"
+        state: "{{ dns_registration_state }}"

@@ -25,10 +25,11 @@
 # docs/CHANGE_CONTROL.md, not run casually.
 
 - name: Provision the dedicated Ansible automation user
-  # !hyperv_hosts: that group connects via WinRM, not SSH, and
-  # roles/automation_user is entirely an SSH-key/sudo concept. !localhost:
-  # the Ansible control node itself. See docs/PROVISIONING.md.
-  hosts: all:!hyperv_hosts:!localhost
+  # !hyperv_hosts / !dns_servers / !ca_servers: all connect via WinRM,
+  # not SSH, and roles/automation_user is entirely an SSH-key/sudo
+  # concept. !localhost: the Ansible control node itself. See
+  # docs/PROVISIONING.md, docs/PKI_DNS.md.
+  hosts: all:!hyperv_hosts:!dns_servers:!ca_servers:!localhost
   become: true
   vars:
     ansible_user: "{{ bootstrap_admin_user }}"

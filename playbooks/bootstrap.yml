@@ -13,14 +13,14 @@
 # provision_automation_user.yml is for.
 
 - name: Bootstrap newly provisioned RHEL hosts
-  # !hyperv_hosts: that group (see docs/PROVISIONING.md) is Windows,
-  # connected via WinRM — none of this play's SSH/sudo/RPM/systemd
-  # assumptions apply to it, and it isn't a "hardened RHEL host" this
-  # repo's roles/ baseline is meant for in the first place. !localhost:
-  # the explicit inventory entry used by playbooks/provision_vm_vcenter.yml
-  # (see docs/PROVISIONING.md) — that's the Ansible control node, not a
-  # managed RHEL host either.
-  hosts: all:!hyperv_hosts:!localhost
+  # !hyperv_hosts / !dns_servers / !ca_servers: all Windows, connected via
+  # WinRM (see docs/PROVISIONING.md, docs/PKI_DNS.md) — none of this
+  # play's SSH/sudo/RPM/systemd assumptions apply to them, and none is a
+  # "hardened RHEL host" this repo's roles/ baseline is meant for in the
+  # first place. !localhost: the explicit inventory entry used by
+  # playbooks/provision_vm_vcenter.yml (see docs/PROVISIONING.md) —
+  # that's the Ansible control node, not a managed RHEL host either.
+  hosts: all:!hyperv_hosts:!dns_servers:!ca_servers:!localhost
   become: true
   serial: "20%"
   max_fail_percentage: 10

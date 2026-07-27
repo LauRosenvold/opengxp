@@ -1,0 +1,220 @@
+---
+# Two paths through this file:
+#   1. certificate_enrollment_request_id is set -> retrieve an
+#      already-approved, previously pending request (see the warning
+#      task below for how you get that ID in the first place).
+#   2. otherwise -> generate a key+CSR on the control node and submit it
+#      as a new request, which the CA either issues immediately or marks
+#      pending manager approval, depending on how the target certificate
+#      template is configured.
+# Either way, an issued certificate is fetched back to the control node
+# at the end — see the final block.
+#
+# The "Issued" / "Taken Under Submission" / "Certificate Retrieved"
+# substrings below are certreq's documented status phrasing, but this
+# hasn't been run against every Windows Server version/locale — verify
+# the exact wording your CA's certreq actually prints (run it by hand
+# once) before trusting the changed_when/failed_when branching blindly,
+# same posture as this repo takes with every other "verify against your
+# installed version" caveat (e.g. rhel9cis_rule_3_1_1).
+
+- name: Ensure the local output directory exists
+  ansible.builtin.file:
+    path: "{{ certificate_enrollment_output_dir }}"
+    state: directory
+    mode: "0750"
+  delegate_to: localhost
+  become: false
+
+- name: Retrieve a previously pending request
+  when: certificate_enrollment_request_id | length > 0
+  block:
+    - name: Retrieve the certificate for the given request ID
+      ansible.windows.win_shell: >
+        certreq -retrieve -config "{{ certificate_enrollment_ca_config }}"
+        {{ certificate_enrollment_request_id }}
+        "C:\Windows\Temp\{{ certificate_enrollment_common_name }}.cer"
+      register: certificate_enrollment_retrieve_result
+      changed_when: "'Certificate Retrieved' in certificate_enrollment_retrieve_result.stdout"
+      failed_when:
+        - certificate_enrollment_retrieve_result.rc != 0
+        - "'Taken Under Submission' not in certificate_enrollment_retrieve_result.stdout"
+
+    - name: Report retrieval status
+      ansible.builtin.debug:
+        msg: "{{ certificate_enrollment_retrieve_result.stdout_lines }}"
+
+    - name: Warn that the request is still pending
+      ansible.builtin.debug:
+        msg: >-
+          Request {{ certificate_enrollment_request_id }} on
+          {{ certificate_enrollment_ca_config }} is still pending manager
+          approval — nothing to fetch yet. Approve it in the
+          Certification Authority console (or `certutil -resubmit
+          {{ certificate_enrollment_request_id }}` on the CA) and re-run
+          this playbook.
+      when: "'Taken Under Submission' in certificate_enrollment_retrieve_result.stdout"
+
+- name: Submit a new certificate request
+  when: certificate_enrollment_request_id | length == 0
+  block:
+    - name: Render the OpenSSL CSR config (subject + SAN list)
+      ansible.builtin.copy:
+        content: "{{ lookup('template', 'csr_openssl.cnf.j2') }}"
+        dest: "{{ certificate_enrollment_output_dir }}/{{ certificate_enrollment_common_name }}.cnf"
+        mode: "0640"
+      delegate_to: localhost
+      become: false
+
+    - name: Generate a private key and CSR on the control node
+      ansible.builtin.command: >
+        openssl req -new -newkey {{ certificate_enrollment_key_algorithm }}:{{ certificate_enrollment_key_size }}
+        -nodes
+        -keyout {{ certificate_enrollment_output_dir }}/{{ certificate_enrollment_common_name }}.key
+        -out {{ certificate_enrollment_output_dir }}/{{ certificate_enrollment_common_name }}.csr
+        -config {{ certificate_enrollment_output_dir }}/{{ certificate_enrollment_common_name }}.cnf
+      delegate_to: localhost
+      become: false
+      changed_when: true
+      # The private key is generated on, and stays on, the control node —
+      # it is NEVER copied to the CA host; only the CSR (public by
+      # design) travels over WinRM in the next task. Restrict who can
+      # read the control node's artifacts/ directory the same way you'd
+      # restrict any other credential store — see the mode 0640 below.
+
+    - name: Restrict the private key's permissions
+      ansible.builtin.file:
+        path: "{{ certificate_enrollment_output_dir }}/{{ certificate_enrollment_common_name }}.key"
+        mode: "0640"
+      delegate_to: localhost
+      become: false
+
+    - name: Copy the CSR to the CA host
+      ansible.windows.win_copy:
+        src: "{{ certificate_enrollment_output_dir }}/{{ certificate_enrollment_common_name }}.csr"
+        dest: "C:\\Windows\\Temp\\{{ certificate_enrollment_common_name }}.csr"
+
+    - name: Submit the CSR to the CA
+      ansible.windows.win_shell: >
+        certreq -submit -config "{{ certificate_enrollment_ca_config }}"
+        -attrib "CertificateTemplate:{{ certificate_enrollment_template }}"
+        "C:\Windows\Temp\{{ certificate_enrollment_common_name }}.csr"
+        "C:\Windows\Temp\{{ certificate_enrollment_common_name }}.cer"
+      register: certificate_enrollment_submit_result
+      changed_when: true
+      failed_when:
+        - "'Issued' not in certificate_enrollment_submit_result.stdout"
+        - "'Taken Under Submission' not in certificate_enrollment_submit_result.stdout"
+
+    - name: Report submission status
+      ansible.builtin.debug:
+        msg: "{{ certificate_enrollment_submit_result.stdout_lines }}"
+
+    - name: Extract the pending request ID, if the CA requires manager approval
+      ansible.builtin.set_fact:
+        # regex_search with a single backreference group returns the
+        # matched group as a plain string (not a list) — see the
+        # "AnsibleWasHere" example in Ansible's own filter docs.
+        certificate_enrollment_pending_id: >-
+          {{ certificate_enrollment_submit_result.stdout
+             | regex_search('RequestId:\s*(\d+)', '\1')
+             | default('', true) }}
+      when: "'Taken Under Submission' in certificate_enrollment_submit_result.stdout"
+
+    - name: Warn that manager approval is required before the certificate can be retrieved
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: the CA at {{ certificate_enrollment_ca_config }}
+          requires manager approval for the
+          "{{ certificate_enrollment_template }}" template — request
+          {{ certificate_enrollment_pending_id }} is pending. Approve it
+          in the Certification Authority console (or `certutil -resubmit
+          {{ certificate_enrollment_pending_id }}` on the CA), then
+          re-run this playbook with
+          -e certificate_enrollment_request_id={{ certificate_enrollment_pending_id }}
+          -e certificate_enrollment_common_name={{ certificate_enrollment_common_name }}
+          to retrieve the issued certificate. The private key/CSR
+          generated just now are already in
+          {{ certificate_enrollment_output_dir }} and don't need to be
+          regenerated.
+      when: "'Taken Under Submission' in certificate_enrollment_submit_result.stdout"
+
+- name: Fetch an issued certificate back to the control node
+  when: >-
+    (certificate_enrollment_retrieve_result is defined and 'Certificate Retrieved' in certificate_enrollment_retrieve_result.stdout)
+    or (certificate_enrollment_submit_result is defined and 'Issued' in certificate_enrollment_submit_result.stdout)
+  block:
+    - name: Fetch the issued certificate
+      ansible.builtin.fetch:
+        src: "C:\\Windows\\Temp\\{{ certificate_enrollment_common_name }}.cer"
+        dest: "{{ certificate_enrollment_output_dir }}/{{ certificate_enrollment_common_name }}.cer"
+        flat: true
+      # Neither -submit nor -retrieve pass `-binary` above, so certreq
+      # writes Base64-encoded X.509 (i.e. PEM: readable text with
+      # -----BEGIN/END CERTIFICATE----- headers) rather than raw DER —
+      # that's certreq's documented default and what apps/netbox,
+      # apps/registry, and server_roles/postgresql_server's own
+      # *_ssl_cert_src all assume. Confirm with `openssl x509 -in
+      # {{ certificate_enrollment_output_dir }}/{{ certificate_enrollment_common_name }}.cer
+      # -noout -text` the first time you run this against a given CA — a
+      # binary/DER file fails that command loudly rather than silently
+      # breaking TLS on whatever consumes it.
+
+    - name: Export the CA's own certificate for the trust chain
+      ansible.windows.win_shell: >
+        certutil -ca.cert "C:\Windows\Temp\{{ certificate_enrollment_common_name }}_ca.cer"
+      changed_when: true
+      failed_when: false
+      # Best-effort: this must run on the CA that actually issued the
+      # certificate. In a multi-tier hierarchy where ca_servers points at
+      # an issuing/subordinate CA, this fetches THAT CA's cert, not the
+      # root's — verify the fetched chain against your actual PKI
+      # hierarchy (`certutil -ca.chain` on the CA gives the full chain as
+      # a .p7b if you need more than one level) before trusting it
+      # blindly on a relying-party host.
+
+    - name: Fetch the CA certificate
+      ansible.builtin.fetch:
+        src: "C:\\Windows\\Temp\\{{ certificate_enrollment_common_name }}_ca.cer"
+        dest: "{{ certificate_enrollment_output_dir }}/{{ certificate_enrollment_common_name }}_ca.cer"
+        flat: true
+      failed_when: false
+
+    - name: Remove temporary files from the CA host
+      ansible.windows.win_file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "C:\\Windows\\Temp\\{{ certificate_enrollment_common_name }}.csr"
+        - "C:\\Windows\\Temp\\{{ certificate_enrollment_common_name }}.cer"
+        - "C:\\Windows\\Temp\\{{ certificate_enrollment_common_name }}_ca.cer"
+
+    - name: Write a reviewable summary of where the issued files ended up
+      ansible.builtin.copy:
+        dest: "{{ certificate_enrollment_output_dir }}/{{ certificate_enrollment_common_name }}.txt"
+        content: |
+          Generated by provisioning/certificate_enrollment — issued
+          against {{ certificate_enrollment_ca_config }}, template
+          {{ certificate_enrollment_template }}.
+
+          private key:  {{ certificate_enrollment_output_dir }}/{{ certificate_enrollment_common_name }}.key
+          certificate:  {{ certificate_enrollment_output_dir }}/{{ certificate_enrollment_common_name }}.cer
+          CA cert:      {{ certificate_enrollment_output_dir }}/{{ certificate_enrollment_common_name }}_ca.cer
+
+          This role does not deploy these files to any managed target
+          itself — point the relevant role's own *_ssl_cert_src /
+          *_ssl_key_src var at the certificate/key paths above as a
+          normal, reviewed group_vars/host_vars change (see
+          docs/CHANGE_CONTROL.md):
+            apps/netbox                    -> netbox_ssl_cert_src / netbox_ssl_key_src
+            apps/registry                   -> registry_ssl_cert_src / registry_ssl_key_src
+            server_roles/postgresql_server  -> postgresql_ssl_cert_src / postgresql_ssl_key_src
+
+          Record this certificate's serial number (open the .cer file, or
+          `certutil -view` on the CA) somewhere your change ticket can
+          reference it — you'll need it for
+          certificate_enrollment_revoke_serial if this certificate is
+          ever revoked before its natural expiry. See docs/PKI_DNS.md.
+        mode: "0640"
+      delegate_to: localhost
+      become: false
