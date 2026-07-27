@@ -10,11 +10,24 @@ aide_db_new_path: /var/lib/aide/aide.db.new.gz
 aide_syslog_facility: local6.notice
 
 # Extra paths for AIDE to watch beyond RHEL's default aide.conf, most
-# relevant to GxP record integrity. Populate with real application paths
-# once known (binaries, config, and — deliberately NOT the record data
-# itself, which changes legitimately and constantly; that's what
-# roles/auditd_gxp's file-access watches are for, not FIM).
-aide_gxp_extra_paths: []
-# Example:
+# relevant to GxP record integrity. `rule: exclude` renders as AIDE's
+# `!path` exclusion syntax instead of a `path rule` watch line — see
+# tasks/main.yml's rendering.
+#
+# The two defaults below aren't role-specific examples — they're the
+# fleet-wide baseline: roles/lvm_storage mounts /opt (application
+# binaries — watched, they should rarely change) and /data (data files —
+# excluded, same "don't drown FIM in noise from data that legitimately
+# changes constantly" reasoning as server_roles/docker_host's
+# /var/lib/docker exclusion) as separate LVM volumes on every host. These
+# entries are correct and harmless even on a host where
+# roles/lvm_storage hasn't actually run (e.g. lvm_storage_enabled: false,
+# or the expected data disk isn't attached yet) — AIDE just watches
+# whatever's really at /opt on the root filesystem in that case, and
+# finds nothing at /data.
+aide_gxp_extra_paths:
+  - { path: "/opt", rule: "R" }
+  - { path: "/data", rule: "exclude" }
+# Add real application-specific paths the same way:
 #   - { path: "/opt/lims/bin", rule: "R" }     # R = read-only/binaries: full check
 #   - { path: "/opt/mes/config", rule: "R" }

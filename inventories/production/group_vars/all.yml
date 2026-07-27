@@ -105,3 +105,15 @@ vcenter_network_portgroup: "CHANGEME"
 # are passed at invocation time via -e or a vars file, not set fleet-wide
 # here — see provisioning/vm_provision/defaults/main.yml and
 # docs/PROVISIONING.md for the full variable list and example.
+
+# --- Storage (LVM: application and data on their own volumes) ------------------
+# roles/lvm_storage's own defaults (lvm_storage_enabled: true,
+# lvm_storage_data_disk: /dev/sdb, vg_data with lv_app->/opt and
+# lv_data->/data) are the fleet-wide baseline — nothing to set here
+# unless you need to deviate. This is exactly the disk
+# provisioning/vm_provision's vm_extra_disk_gb creates — see
+# docs/STORAGE.md. Override per-tier in gxp_critical.yml/gxp_standard.yml
+# or per-host in host_vars if a specific host's second disk shows up
+# under a different device name, or needs different LV sizing.
+# lvm_storage_data_disk: /dev/sdb
+# lvm_storage_volumes: [...]   # redefine the whole list to change sizing/mount points — see roles/lvm_storage/defaults/main.yml

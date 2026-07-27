@@ -107,6 +107,16 @@ environment differs:
   [docs/PROVISIONING.md](docs/PROVISIONING.md), including why several
   existing `hosts: all` playbooks changed to exclude `hyperv_hosts` and
   `localhost`.
+- **LVM, application and data on their own volumes, fleet-wide.**
+  `roles/lvm_storage` builds a volume group on a dedicated additional
+  disk (exactly what `provisioning/vm_provision`'s `vm_extra_disk_gb`
+  creates) and mounts `/opt` (application) and `/data` (data)
+  separately from root — it never touches the root disk's own
+  partitioning, which stays a kickstart/image-template decision. Refuses
+  to touch a disk that already has a filesystem/LVM signature unless
+  explicitly forced. See [docs/STORAGE.md](docs/STORAGE.md), including
+  how to add workload-specific volumes (e.g. `/var/lib/pgsql`) using the
+  same mechanism per host group.
 
 ## Layout
 
@@ -132,11 +142,13 @@ playbooks/
   registry.yml                 # application deployment, NOT part of site.yml — see APPS.md
   provision_vm_vcenter.yml     # creates a VM from a vCenter template — runs BEFORE any of the above, see PROVISIONING.md
   provision_vm_hyperv.yml      # creates a VM from a Hyper-V template — runs BEFORE any of the above, see PROVISIONING.md
+  lvm_storage_grow.yml         # explicitly-gated LV/filesystem grow, --tags grow required
 roles/
   automation_user/            # dedicated non-root local account every playbook connects as
   common/                     # hostname, timezone, chrony baseline, MOTD/banner, base packages
   satellite_registration/     # subscription-manager -> Satellite org/activation key
   patch_management/           # dnf update policy, reboot handling, maintenance windows
+  lvm_storage/                 # fleet-wide LVM: /opt (application) + /data (data), separate from root — see STORAGE.md
   cis_hardening/               # thin wrapper: dispatches to lockdown roles per OS group
   el10_baseline_hardening/      # fallback CIS-equivalent controls for RHEL10 + AlmaLinux10
   ssh_hardening/                # OpenSSH server hardening beyond generic CIS defaults
@@ -169,6 +181,7 @@ docs/
   APPS.md                        # why apps/ is a third tier below server_roles/, plus netbox/registry specifics
   IDENTITY.md                    # AD/IdM join, SSH/sudo group mapping, ID mapping choice, GSSAPI SSH
   PROVISIONING.md                # why provisioning/ runs before every other tier, vCenter/Hyper-V specifics
+  STORAGE.md                     # fleet-wide LVM layout, safety checks, growing a volume, adding workload-specific mounts
 ```
 
 ## Usage
@@ -284,6 +297,17 @@ immutable by default):
 
 ```bash
 ansible-playbook playbooks/registry.yml -i inventories/staging/hosts.yml --check --diff
+```
+
+Grow an existing LVM volume (explicitly gated — read
+[docs/STORAGE.md](docs/STORAGE.md) first; this only extends within the
+volume group's existing free space):
+
+```bash
+ansible-playbook playbooks/lvm_storage_grow.yml -i inventories/staging/hosts.yml \
+  --limit app06.gxp.example.internal --tags grow \
+  -e lvm_storage_grow_confirmed=true -e lvm_storage_grow_lv_name=lv_data \
+  -e lvm_storage_grow_size=+20G
 ```
 
 ## Secrets

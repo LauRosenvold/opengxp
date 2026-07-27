@@ -58,3 +58,8 @@ vcenter_datacenter: "CHANGEME"
 vcenter_cluster: "CHANGEME"
 vcenter_datastore: "CHANGEME"
 vcenter_network_portgroup: "CHANGEME"
+
+# --- Storage (LVM: application and data on their own volumes) ------------------
+# See the note in inventories/production/group_vars/all.yml — same rule
+# applies here. roles/lvm_storage's own defaults are the fleet-wide
+# baseline; nothing to set here unless you need to deviate.

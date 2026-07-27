@@ -1,0 +1,70 @@
+---
+- name: Create the volume group on the data disk
+  community.general.lvg:
+    vg: "{{ lvm_storage_volume_group_name }}"
+    pvs: "{{ lvm_storage_data_disk }}"
+    state: present
+
+- name: Create logical volumes
+  community.general.lvol:
+    vg: "{{ lvm_storage_volume_group_name }}"
+    lv: "{{ item.name }}"
+    size: "{{ item.size }}"
+    shrink: false
+  loop: "{{ lvm_storage_volumes }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Create filesystems on each logical volume
+  ansible.builtin.filesystem:
+    dev: "/dev/{{ lvm_storage_volume_group_name }}/{{ item.name }}"
+    fstype: "{{ item.fs_type }}"
+  loop: "{{ lvm_storage_volumes }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Ensure mount point directories exist
+  ansible.builtin.file:
+    path: "{{ item.mount_point }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop: "{{ lvm_storage_volumes }}"
+  loop_control:
+    label: "{{ item.mount_point }}"
+
+- name: Mount each logical volume persistently
+  ansible.posix.mount:
+    path: "{{ item.mount_point }}"
+    src: "/dev/{{ lvm_storage_volume_group_name }}/{{ item.name }}"
+    fstype: "{{ item.fs_type }}"
+    opts: "{{ item.mount_options }}"
+    state: mounted
+  loop: "{{ lvm_storage_volumes }}"
+  loop_control:
+    label: "{{ item.mount_point }}"
+
+# A freshly mounted filesystem doesn't inherit the SELinux context you
+# might expect just from its path — roles/selinux_enforce keeps SELinux
+# enforcing fleet-wide, so this matters: without it, the first workload
+# that tries to write under /opt or /data can hit real denials. See
+# docs/STORAGE.md.
+- name: Set the SELinux file context for each mount point
+  community.general.sefcontext:
+    target: "{{ item.mount_point }}(/.*)?"
+    setype: "{{ lvm_storage_selinux_context_by_mount[item.mount_point] }}"
+    state: present
+  loop: "{{ lvm_storage_volumes }}"
+  loop_control:
+    label: "{{ item.mount_point }}"
+  when: item.mount_point in lvm_storage_selinux_context_by_mount
+
+- name: Apply the SELinux file context to the mount point now
+  ansible.builtin.command: "restorecon -R -v {{ item.mount_point }}"
+  register: lvm_storage_restorecon_result
+  loop: "{{ lvm_storage_volumes }}"
+  loop_control:
+    label: "{{ item.mount_point }}"
+  when: item.mount_point in lvm_storage_selinux_context_by_mount
+  changed_when: "'Relabeled' in (lvm_storage_restorecon_result.stdout | default(''))"

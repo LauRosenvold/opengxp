@@ -1,0 +1,27 @@
+---
+# AIDE integration for the /opt and /data mounts this role creates lives
+# in roles/aide_fim's own defaults (aide_gxp_extra_paths), not here —
+# aide_fim owns /etc/aide.conf and the ordering relative to package
+# install + `aide --init`; reaching into that file from this role would
+# risk a bootstrap-time ordering conflict (this role runs in
+# playbooks/bootstrap.yml, aide_fim runs later in playbooks/hardening.yml).
+# See docs/STORAGE.md.
+
+- name: Check prerequisites and safety
+  ansible.builtin.include_tasks: checks.yml
+  tags: [prep]
+  when: lvm_storage_enabled | bool
+
+- name: Create volume group, logical volumes, filesystems, and mounts
+  ansible.builtin.include_tasks: volumes.yml
+  tags: [prep]
+  when:
+    - lvm_storage_enabled | bool
+    - lvm_storage_disk_present | default(false)
+
+- name: Grow an existing logical volume
+  ansible.builtin.include_tasks: grow.yml
+  tags: [grow, never]
+  # `never`: only runs via `--tags grow`, from
+  # playbooks/lvm_storage_grow.yml — see tasks/grow.yml's own header
+  # comment for why.

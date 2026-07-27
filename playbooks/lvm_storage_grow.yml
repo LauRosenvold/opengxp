@@ -1,0 +1,38 @@
+---
+# Explicitly-gated LV/filesystem grow — see
+# roles/lvm_storage/tasks/grow.yml's header comment and roles/fips_mode
+# for the same "extra-var gate" pattern used elsewhere in this repo for
+# actions that should never happen as a side effect of a routine run.
+#
+# `--tags grow` is NOT optional: tasks/grow.yml is tagged `[grow, never]`,
+# meaning it's excluded from a normal `hosts: all` run and only executes
+# when `grow` is explicitly requested — same convention as
+# playbooks/kubernetes_upgrade.yml.
+#
+# Usage:
+#   ansible-playbook playbooks/lvm_storage_grow.yml \
+#     -i inventories/staging/hosts.yml --limit app06.gxp.example.internal \
+#     --tags grow \
+#     -e lvm_storage_grow_confirmed=true \
+#     -e lvm_storage_grow_lv_name=lv_data \
+#     -e lvm_storage_grow_size=+20G
+#
+# This only extends the LV/filesystem — it does not grow the underlying
+# volume group. If vg_data itself is out of free space, you need to
+# attach a larger/additional disk and extend the VG onto it
+# (`community.general.lvg`'s `pvs:` list, or `vgextend` by hand) before
+# this playbook has anything to work with.
+#
+# Deliberately no `tags:` on the role entry below — adding tags there
+# would tag EVERY task in the role (including checks.yml/volumes.yml),
+# defeating the whole point of grow.yml's `never` tag the same way it
+# would have for playbooks/kubernetes_upgrade.yml. `--tags grow` alone is
+# what makes only the gated grow task run.
+
+- name: Grow an LVM logical volume and its filesystem
+  hosts: all:!hyperv_hosts:!localhost
+  become: true
+  serial: 1
+
+  roles:
+    - lvm_storage

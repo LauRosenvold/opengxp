@@ -16,7 +16,11 @@ vm_name: "CHANGEME"                 # becomes the hypervisor-side VM name — NO
 vm_state: present                   # present (create/ensure running) | absent (decommission — see docs/PROVISIONING.md before using this)
 vm_cpu_count: 2
 vm_memory_mb: 4096
-vm_extra_disk_gb: 0                 # 0 = template's own disk size only; >0 adds one additional data disk
+vm_extra_disk_gb: 0                 # 0 = template's own disk size only; >0 adds one additional data disk —
+                                     # exactly the disk roles/lvm_storage expects to find and build vg_data
+                                     # on once this host runs playbooks/bootstrap.yml — see docs/STORAGE.md.
+                                     # Set this > 0 for any new host unless it genuinely needs no separate
+                                     # /opt+/data volumes.
 
 # ================================================================================
 # vCenter

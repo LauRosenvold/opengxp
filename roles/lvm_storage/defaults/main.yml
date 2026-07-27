@@ -1,0 +1,60 @@
+---
+# Fleet-wide baseline: application and data get their own LVM logical
+# volumes, separate from the root filesystem, on every Linux host this
+# repo manages. Lives in roles/ (not server_roles/) because it's a base
+# OS concern that applies regardless of what the host ends up running —
+# see docs/STORAGE.md.
+#
+# This consumes an ADDITIONAL block device — it does not, and cannot
+# safely, repartition the root disk after install (same limitation
+# roles/el10_baseline_hardening's /tmp mount-point check already
+# documents — Ansible can't safely reshape a live root filesystem).
+# provisioning/vm_provision's `vm_extra_disk_gb` is exactly the disk this
+# role expects to find: set that when provisioning a new VM, and this
+# role picks it up on first boot. See docs/STORAGE.md.
+
+lvm_storage_enabled: true
+
+# The additional disk to build the volume group from. /dev/sdb is the
+# common default second-disk device name on both vCenter and Hyper-V
+# guests with a single extra disk attached (matches
+# provisioning/vm_provision's default assumption) — verify against your
+# actual template/VM if it differs.
+lvm_storage_data_disk: /dev/sdb
+
+lvm_storage_volume_group_name: vg_data
+
+# Two LVs by default: one for installed application software, one for
+# the data it produces — see docs/STORAGE.md for why these specific
+# mount points (/opt, /data) were chosen and how to add more
+# workload-specific ones (e.g. /var/lib/pgsql, /var/lib/docker) using the
+# same mechanism, per host group.
+lvm_storage_volumes:
+  - name: lv_app
+    mount_point: /opt
+    size: "30%VG"
+    fs_type: xfs
+    mount_options: "defaults,nodev,nosuid"
+    # /opt holds application binaries (this repo's apps/server_roles
+    # already install there — apps/netbox, apps/registry) — needs exec.
+  - name: lv_data
+    mount_point: /data
+    size: "100%FREE"
+    fs_type: xfs
+    mount_options: "defaults,nodev,nosuid,noexec"
+    # /data is for data files, never binaries — noexec is safe and
+    # deliberate here, unlike /opt.
+
+# Refuses to touch a disk that already shows a filesystem/PV/partition
+# signature unless explicitly forced — see tasks/checks.yml. This is the
+# single most important safety property of this role: never silently
+# repurpose a disk that might already hold something.
+lvm_storage_force: false
+
+# SELinux context to apply to each mount point (roles/selinux_enforce
+# keeps SELinux enforcing fleet-wide — see docs/STORAGE.md for why a
+# freshly mounted filesystem needs this set explicitly rather than
+# inheriting a default that may not be what you want).
+lvm_storage_selinux_context_by_mount:
+  /opt: usr_t
+  /data: var_t

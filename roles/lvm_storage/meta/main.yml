@@ -1,0 +1,16 @@
+---
+galaxy_info:
+  role_name: lvm_storage
+  description: >-
+    Fleet-wide baseline: application (/opt) and data (/data) get their
+    own LVM logical volumes on a dedicated additional disk, separate from
+    the root filesystem, on every Linux host. Refuses to touch a disk
+    that already has a filesystem/PV signature unless explicitly forced.
+    Includes an explicitly-gated LV/filesystem grow path. See
+    docs/STORAGE.md.
+  license: Apache-2.0
+  min_ansible_version: "2.15"
+  platforms:
+    - name: EL
+      versions: ["9", "10"]
+dependencies: []

@@ -1,0 +1,61 @@
+---
+- name: Determine the data disk's basename for fact lookup
+  ansible.builtin.set_fact:
+    lvm_storage_disk_basename: "{{ lvm_storage_data_disk | basename }}"
+
+- name: Check whether the expected data disk is present
+  ansible.builtin.set_fact:
+    lvm_storage_disk_present: "{{ lvm_storage_disk_basename in (ansible_devices | default({})) }}"
+
+- name: Warn and skip if the expected data disk isn't attached
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: lvm_storage_enabled is true but {{ lvm_storage_data_disk }}
+      doesn't exist on {{ inventory_hostname }} — skipping LVM setup
+      entirely for this run. This host has no separate /opt or /data
+      volume yet; its application/data paths currently live on the root
+      filesystem. If this host was created via provisioning/vm_provision,
+      check that vm_extra_disk_gb was actually set > 0 when it was
+      provisioned — see docs/STORAGE.md. If this is intentional (a host
+      that genuinely doesn't need separate storage), set
+      lvm_storage_enabled: false for it instead of leaving this warning
+      showing up on every run.
+  when: not lvm_storage_disk_present
+
+- name: Check the data disk's existing signature, if any
+  ansible.builtin.command: "blkid -o value -s TYPE {{ lvm_storage_data_disk }}"
+  register: lvm_storage_blkid_check
+  changed_when: false
+  failed_when: false
+  when: lvm_storage_disk_present
+
+- name: Check whether an existing LVM PV on this disk already belongs to our volume group
+  ansible.builtin.command: "pvs --noheadings -o vg_name {{ lvm_storage_data_disk }}"
+  register: lvm_storage_pv_vg_check
+  changed_when: false
+  failed_when: false
+  when:
+    - lvm_storage_disk_present
+    - (lvm_storage_blkid_check.stdout | default('')) | trim == 'LVM2_member'
+
+- name: Fail loudly if the disk has a signature that isn't our own volume group
+  ansible.builtin.assert:
+    that:
+      - >-
+        (lvm_storage_blkid_check.stdout | default('')) | trim == ''
+        or ((lvm_storage_blkid_check.stdout | trim == 'LVM2_member')
+            and ((lvm_storage_pv_vg_check.stdout | default('')) | trim == lvm_storage_volume_group_name))
+    fail_msg: >-
+      {{ lvm_storage_data_disk }} on {{ inventory_hostname }} already has
+      a signature ({{ lvm_storage_blkid_check.stdout | default('unknown') | trim }})
+      that isn't this role's own {{ lvm_storage_volume_group_name }}
+      volume group — refusing to touch it. This is almost certainly
+      either a disk that already holds real data, or a naming mismatch
+      worth investigating before proceeding. If you are CERTAIN this disk
+      is safe to wipe and rebuild, set lvm_storage_force: true for this
+      run only, then set it back to false afterward — this is a
+      deliberately inconvenient, one-shot override, not a persistent
+      setting to leave on.
+  when:
+    - lvm_storage_disk_present
+    - not (lvm_storage_force | bool)

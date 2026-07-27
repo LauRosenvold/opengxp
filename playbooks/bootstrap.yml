@@ -32,3 +32,8 @@
       tags: [bootstrap, satellite]
     - role: common
       tags: [bootstrap, common]
+    - role: lvm_storage
+      tags: [bootstrap, storage]
+      # Runs here, before hardening.yml (roles/aide_fim's baseline init)
+      # and well before any server_roles/apps playbook writes to /opt —
+      # see docs/STORAGE.md.

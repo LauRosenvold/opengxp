@@ -10,7 +10,11 @@
     marker: "# {mark} ANSIBLE MANAGED BLOCK — roles/aide_fim GxP extra paths"
     block: |
       {% for item in aide_gxp_extra_paths %}
+      {% if item.rule == 'exclude' %}
+      !{{ item.path }}
+      {% else %}
       {{ item.path }} {{ item.rule }}
+      {% endif %}
       {% endfor %}
   register: aide_conf_changed
 

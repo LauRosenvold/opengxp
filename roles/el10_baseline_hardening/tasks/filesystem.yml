@@ -22,7 +22,10 @@
       OS install/kickstart time — Ansible cannot safely repartition a live
       root filesystem. Fix in the kickstart/image template for future
       builds and track existing hosts as a documented, risk-accepted
-      finding in the compliance_scan.yml evidence until reimaged.
+      finding in the compliance_scan.yml evidence until reimaged. (This is
+      the same root-disk limitation roles/lvm_storage works around for
+      /opt and /data by using a separate, additional disk instead of
+      trying to reshape root — see docs/STORAGE.md.)
   when: el10_baseline_tmp_mount.rc != 0
 
 - name: Check /tmp mount options include noexec,nosuid,nodev

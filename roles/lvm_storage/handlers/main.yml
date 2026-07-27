@@ -1,0 +1,5 @@
+---
+# No handlers needed — mounting a filesystem doesn't require restarting
+# any service. Kept as a placeholder so a future addition can safely
+# `notify` into this file without a rename, same convention as
+# roles/common/handlers/main.yml.
