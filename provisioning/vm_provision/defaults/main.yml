@@ -1,17 +1,18 @@
 ---
 # Creates (or removes) a VM from a template on a hypervisor cluster —
-# vCenter (community.vmware.vmware_guest) or Hyper-V (ansible.windows
+# vCenter (community.vmware.vmware_guest), Hyper-V (ansible.windows
 # PowerShell against the Hyper-V host via WinRM, cloning via
-# `Import-VM -Copy -GenerateNewId` from an exported template VM). See
-# docs/PROVISIONING.md for why this is its own top-level tier
+# `Import-VM -Copy -GenerateNewId` from an exported template VM), or
+# Proxmox VE (community.proxmox.proxmox_kvm against the PVE REST API).
+# See docs/PROVISIONING.md for why this is its own top-level tier
 # (provisioning/, not roles/server_roles/apps) — it runs against a
 # hypervisor management API, not a managed Linux host, and the host it
 # creates doesn't exist for Ansible to configure at all until this
 # finishes.
 
-provisioning_hypervisor: vcenter   # vcenter | hyperv
+provisioning_hypervisor: vcenter   # vcenter | hyperv | proxmox
 
-# --- Common VM spec (both hypervisors) -----------------------------------------
+# --- Common VM spec (all hypervisors) -------------------------------------------
 vm_name: "CHANGEME"                 # becomes the hypervisor-side VM name — NOT automatically the eventual OS hostname, see docs/PROVISIONING.md
 vm_state: present                   # present (create/ensure running) | absent (decommission — see docs/PROVISIONING.md before using this)
 vm_cpu_count: 2
@@ -76,6 +77,51 @@ hyperv_static_mac_address: ""               # empty = Hyper-V assigns a dynamic 
 # way already). Real hostname/network configuration for a
 # Hyper-V-provisioned VM happens on its first real Ansible run
 # (playbooks/provision_automation_user.yml onward), not here.
+
+# ================================================================================
+# Proxmox VE
+# ================================================================================
+# Talks straight to the Proxmox REST API from the control node — no SSH
+# or WinRM to the hypervisor needed for provisioning itself, closer in
+# shape to the vCenter path above than to Hyper-V's WinRM one. Runs on
+# `localhost`, same as vCenter — see playbooks/provision_vm_proxmox.yml.
+proxmox_api_host: "CHANGEME"          # e.g. pve01.gxp.example.internal
+proxmox_api_user: "CHANGEME"          # e.g. automation@pve — a dedicated PVE user with a scoped role is strongly preferred over root@pam
+# Prefer an API token over a password — it's scoped, individually
+# revocable, and never touches the PVE web UI's own session/ticket
+# mechanism at all. Set BOTH id and secret to use one; leave both empty
+# and set proxmox_api_password instead only if your estate hasn't set up
+# API tokens yet. A token is also required for the best-effort guest-IP
+# lookup below — password auth skips that step entirely.
+proxmox_api_token_id: ""
+proxmox_api_token_secret: ""          # vaulted, no default
+proxmox_api_password: ""              # vaulted, no default — fallback only, see above
+proxmox_validate_certs: true          # only set false against a known lab/self-signed PVE, never production
+
+proxmox_node: "CHANGEME"              # the PVE cluster node to place the clone on, e.g. "pve01"
+proxmox_template_vmid: "CHANGEME"     # numeric VMID of the template to clone FROM — Proxmox clones by ID, not name
+proxmox_vmid: "CHANGEME"              # numeric VMID for the NEW VM — deliberately no auto-assignment, see tasks/proxmox.yml
+proxmox_storage: "CHANGEME"           # target storage for the clone's disk(s), e.g. "local-lvm"
+proxmox_disk_format: qcow2            # only meaningful for file-backed storage; ignored for block storage like LVM-thin
+proxmox_full_clone: true              # true (default) = independent full clone; false = linked clone that stays dependent on the template disk existing forever — see docs/PROVISIONING.md
+proxmox_pool: ""                      # optional Proxmox resource pool to place the VM in
+
+proxmox_bridge: "CHANGEME"            # e.g. vmbr0
+proxmox_vlan_tag: ""                  # empty = no VLAN tag (access port)
+
+# Cloud-init guest customization — only takes effect if
+# proxmox_template_vmid's template already has a cloud-init drive
+# configured (built into the template with
+# `qm set <vmid> --ide2 <storage>:cloudinit` when it was created); this
+# role does not add one retroactively. Leave proxmox_cloudinit_ip_config
+# empty to skip this entirely and let the template's own defaults apply
+# — same "don't clobber a baked-in default with an empty string" posture
+# as vcenter_customization_domain above.
+proxmox_cloudinit_ip_config: ""       # Proxmox's own ipconfig0 syntax verbatim, e.g. "ip=10.20.10.55/24,gw=10.20.10.1" or "ip=dhcp"
+proxmox_cloudinit_nameserver: ""
+proxmox_cloudinit_searchdomain: ""
+proxmox_cloudinit_sshkeys: ""         # one or more public keys, newline-separated — same format `qm set --sshkeys` expects
+proxmox_cloudinit_user: ""            # cloud-init user to create; leave empty to rely on the template's own baked-in user/key instead
 
 # --- Output ------------------------------------------------------------------
 # Where a reviewable inventory snippet gets written after a successful

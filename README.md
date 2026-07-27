@@ -121,15 +121,16 @@ environment differs:
   it's running.
 - **VM provisioning (`provisioning/vm_provision`) is a fourth tier that
   runs *before* everything above — it creates the VM itself** against
-  vCenter or Hyper-V, before any managed Linux host exists for the rest
-  of this repo to touch. On-prem only (no cloud provider support), and it
-  needs Python libraries on the **control node** (`pyvmomi`, `pywinrm`),
-  not a managed target — the first dependency of that kind in this repo.
-  It does not register a newly created host into the checked-in
-  inventory for you; that stays a deliberate, reviewed change. See
+  vCenter, Hyper-V, or Proxmox VE, before any managed Linux host exists
+  for the rest of this repo to touch. On-prem only (no cloud provider
+  support), and it needs Python libraries on the **control node**
+  (`pyvmomi`, `pywinrm`, `proxmoxer`/`requests`), not a managed target —
+  the first dependency of that kind in this repo. It does not register a
+  newly created host into the checked-in inventory for you; that stays a
+  deliberate, reviewed change. See
   [docs/PROVISIONING.md](docs/PROVISIONING.md), including why several
   existing `hosts: all` playbooks changed to exclude `hyperv_hosts` and
-  `localhost`.
+  `localhost`, and why Proxmox VMIDs are never auto-assigned.
 - **DNS records and Windows-PKI certificates (`provisioning/dns_registration`,
   `provisioning/certificate_enrollment`) connect to Windows over WinRM,
   same as `vm_provision`'s Hyper-V path** — `win_dns_record` for DNS,
@@ -176,6 +177,7 @@ playbooks/
   registry.yml                 # application deployment, NOT part of site.yml — see APPS.md
   provision_vm_vcenter.yml     # creates a VM from a vCenter template — runs BEFORE any of the above, see PROVISIONING.md
   provision_vm_hyperv.yml      # creates a VM from a Hyper-V template — runs BEFORE any of the above, see PROVISIONING.md
+  provision_vm_proxmox.yml     # creates a VM from a Proxmox VE template — runs BEFORE any of the above, see PROVISIONING.md
   register_dns.yml             # creates/removes DNS records on a Windows DNS Server — see PKI_DNS.md
   request_certificate.yml      # requests/revokes a certificate from a Windows CA (ADCS) — see PKI_DNS.md
   lvm_storage_grow.yml         # explicitly-gated LV/filesystem grow, --tags grow required
@@ -206,7 +208,7 @@ apps/                           # application deployments on top of server_roles
   netbox/                         # NetBox Docker Compose stack: nginx TLS proxy, external-DB-recommended, containerized Redis
   registry/                       # Private Docker/OCI registry: native TLS, mandatory htpasswd auth, immutable images by default
 provisioning/                   # creates the VM itself, before any tier above applies — see PROVISIONING.md
-  vm_provision/                    # vCenter (community.vmware) or Hyper-V (ansible.windows + PowerShell), clone from template
+  vm_provision/                    # vCenter (community.vmware), Hyper-V (ansible.windows + PowerShell), or Proxmox VE (community.proxmox), clone from template
   dns_registration/                # Windows DNS Server A/CNAME/PTR records via WinRM — see PKI_DNS.md
   certificate_enrollment/          # Windows CA (ADCS) certificate request/revoke via certreq/certutil over WinRM — see PKI_DNS.md
 molecule/
@@ -218,7 +220,7 @@ docs/
   SERVER_ROLES.md                # why server_roles/ is separate from roles/, and per-role specifics
   APPS.md                        # why apps/ is a third tier below server_roles/, plus netbox/registry specifics
   IDENTITY.md                    # AD/IdM join, SSH/sudo group mapping, ID mapping choice, GSSAPI SSH
-  PROVISIONING.md                # why provisioning/ runs before every other tier, vCenter/Hyper-V specifics
+  PROVISIONING.md                # why provisioning/ runs before every other tier, vCenter/Hyper-V/Proxmox specifics
   PKI_DNS.md                     # DNS record + Windows-PKI certificate provisioning, why WinRM was chosen
   STORAGE.md                     # fleet-wide LVM layout, safety checks, growing a volume, adding workload-specific mounts
 ```
@@ -233,9 +235,9 @@ ansible-galaxy collection install -r requirements.yml -p collections -f
 ```
 
 **If the VM doesn't exist yet**, create it from a template first — see
-[docs/PROVISIONING.md](docs/PROVISIONING.md) before using either of
-these on anything real (control-node prerequisites, decommission
-caveats, the guest-customization asymmetry between the two hypervisors):
+[docs/PROVISIONING.md](docs/PROVISIONING.md) before using any of these
+on anything real (control-node prerequisites, decommission caveats, the
+guest-customization asymmetry across the three hypervisors):
 
 ```bash
 ansible-playbook playbooks/provision_vm_vcenter.yml -i inventories/staging/hosts.yml \
@@ -244,6 +246,11 @@ ansible-playbook playbooks/provision_vm_vcenter.yml -i inventories/staging/hosts
 ansible-playbook playbooks/provision_vm_hyperv.yml -i inventories/staging/hosts.yml \
   --limit hyperv01.gxp.example.internal -e vm_name=app07 \
   -e hyperv_template_export_path='D:\HyperV\Templates\rhel9-golden'
+
+ansible-playbook playbooks/provision_vm_proxmox.yml -i inventories/staging/hosts.yml \
+  -e vm_name=app08 -e proxmox_api_host=pve01.gxp.example.internal \
+  -e proxmox_node=pve01 -e proxmox_template_vmid=9000 -e proxmox_vmid=180 \
+  -e proxmox_storage=local-lvm -e proxmox_bridge=vmbr0
 ```
 
 **Give the new host a DNS name** before doing anything else with it —

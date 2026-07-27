@@ -1,0 +1,222 @@
+---
+# Runs on localhost (see playbooks/provision_vm_proxmox.yml) — Proxmox
+# REST API calls go straight from the control node to proxmox_api_host,
+# no SSH or WinRM to the hypervisor needed, closer in shape to the
+# vCenter path (tasks/vcenter.yml) than to Hyper-V's WinRM one.
+#
+# community.proxmox.proxmox_kvm's exact parameter set has shifted between
+# the (deprecated) community.general.proxmox_kvm and the newer
+# community.proxmox collection versions — verify with `ansible-doc
+# community.proxmox.proxmox_kvm` against whatever's actually pinned in
+# requirements.yml before relying on this in production, same posture as
+# every other third-party-module caveat in this repo (e.g.
+# provisioning/dns_registration's win_dns_record note).
+
+- name: Fail loudly if required Proxmox connection/placement details are missing
+  ansible.builtin.assert:
+    that:
+      - proxmox_api_host != 'CHANGEME'
+      - proxmox_api_user != 'CHANGEME'
+      - (proxmox_api_token_id | length > 0 and proxmox_api_token_secret | length > 0) or proxmox_api_password | length > 0
+      - proxmox_node != 'CHANGEME'
+      - proxmox_vmid != 'CHANGEME'
+      - vm_name != 'CHANGEME'
+    fail_msg: >-
+      One or more required proxmox_*/vm_name vars are still at their
+      CHANGEME placeholder, or neither an API token
+      (proxmox_api_token_id + proxmox_api_token_secret) nor
+      proxmox_api_password was supplied — see
+      provisioning/vm_provision/defaults/main.yml for the full list.
+      proxmox_vmid is required even to decommission (state: absent uses
+      it too, not just create) — this role does not auto-assign or
+      look one up by name for you, so the ID that ends up in a change
+      ticket is always the one you actually typed.
+
+- name: Fail loudly if template/storage/network aren't set (create only, not needed to decommission)
+  ansible.builtin.assert:
+    that:
+      - proxmox_template_vmid != 'CHANGEME'
+      - proxmox_storage != 'CHANGEME'
+      - proxmox_bridge != 'CHANGEME'
+    fail_msg: >-
+      proxmox_template_vmid / proxmox_storage / proxmox_bridge are still
+      at their CHANGEME placeholders.
+  when: vm_state == 'present'
+
+- name: Clone the VM from the Proxmox template
+  community.proxmox.proxmox_kvm:
+    api_host: "{{ proxmox_api_host }}"
+    api_user: "{{ proxmox_api_user }}"
+    api_token_id: "{{ proxmox_api_token_id if proxmox_api_token_id | length > 0 else omit }}"
+    api_token_secret: "{{ proxmox_api_token_secret if proxmox_api_token_secret | length > 0 else omit }}"
+    api_password: "{{ proxmox_api_password if proxmox_api_password | length > 0 else omit }}"
+    validate_certs: "{{ proxmox_validate_certs }}"
+    node: "{{ proxmox_node }}"
+    clone: "{{ vm_name }}"
+    vmid: "{{ proxmox_template_vmid }}"
+    newid: "{{ proxmox_vmid }}"
+    name: "{{ vm_name }}"
+    storage: "{{ proxmox_storage }}"
+    format: "{{ proxmox_disk_format }}"
+    full: "{{ proxmox_full_clone }}"
+    pool: "{{ proxmox_pool if proxmox_pool | length > 0 else omit }}"
+    cores: "{{ vm_cpu_count }}"
+    memory: "{{ vm_memory_mb }}"
+    timeout: 600
+  delegate_to: localhost
+  when: vm_state == 'present'
+
+- name: Configure the network interface and cloud-init, if a cloud-init drive exists on the template
+  community.proxmox.proxmox_kvm:
+    api_host: "{{ proxmox_api_host }}"
+    api_user: "{{ proxmox_api_user }}"
+    api_token_id: "{{ proxmox_api_token_id if proxmox_api_token_id | length > 0 else omit }}"
+    api_token_secret: "{{ proxmox_api_token_secret if proxmox_api_token_secret | length > 0 else omit }}"
+    api_password: "{{ proxmox_api_password if proxmox_api_password | length > 0 else omit }}"
+    validate_certs: "{{ proxmox_validate_certs }}"
+    node: "{{ proxmox_node }}"
+    vmid: "{{ proxmox_vmid }}"
+    update: true
+    net:
+      net0: "virtio,bridge={{ proxmox_bridge }}{{ ',tag=' + proxmox_vlan_tag if proxmox_vlan_tag | length > 0 else '' }}"
+    ipconfig:
+      ipconfig0: "{{ proxmox_cloudinit_ip_config }}"
+    nameservers: "{{ proxmox_cloudinit_nameserver if proxmox_cloudinit_nameserver | length > 0 else omit }}"
+    searchdomains: "{{ proxmox_cloudinit_searchdomain if proxmox_cloudinit_searchdomain | length > 0 else omit }}"
+    sshkeys: "{{ proxmox_cloudinit_sshkeys if proxmox_cloudinit_sshkeys | length > 0 else omit }}"
+    ciuser: "{{ proxmox_cloudinit_user if proxmox_cloudinit_user | length > 0 else omit }}"
+  delegate_to: localhost
+  when:
+    - vm_state == 'present'
+    - proxmox_cloudinit_ip_config | length > 0
+  # Only takes effect if proxmox_template_vmid's template already has a
+  # cloud-init drive configured (ide2/cloudinit, built with `qm set
+  # <vmid> --ide2 <storage>:cloudinit` when the template was created) —
+  # this role does not add one retroactively. Skipped entirely (net0
+  # still gets set on the clone task's own defaults otherwise) if
+  # proxmox_cloudinit_ip_config is left empty, same "leave the template's
+  # own baked-in defaults alone rather than clobber them with empty
+  # strings" posture as vcenter_customization_domain.
+
+- name: Attach an additional data disk, if requested
+  community.proxmox.proxmox_disk:
+    api_host: "{{ proxmox_api_host }}"
+    api_user: "{{ proxmox_api_user }}"
+    api_token_id: "{{ proxmox_api_token_id if proxmox_api_token_id | length > 0 else omit }}"
+    api_token_secret: "{{ proxmox_api_token_secret if proxmox_api_token_secret | length > 0 else omit }}"
+    api_password: "{{ proxmox_api_password if proxmox_api_password | length > 0 else omit }}"
+    validate_certs: "{{ proxmox_validate_certs }}"
+    vmid: "{{ proxmox_vmid }}"
+    disk: scsi1
+    # scsi1 assumes the template's own boot disk is scsi0, which is the
+    # common default — verify against your actual template if it uses a
+    # different bus/slot for its boot disk, or this collides with it.
+    size: "{{ vm_extra_disk_gb }}G"
+    storage: "{{ proxmox_storage }}"
+    state: present
+  delegate_to: localhost
+  when:
+    - vm_state == 'present'
+    - vm_extra_disk_gb | int > 0
+
+- name: Start the VM
+  community.proxmox.proxmox_kvm:
+    api_host: "{{ proxmox_api_host }}"
+    api_user: "{{ proxmox_api_user }}"
+    api_token_id: "{{ proxmox_api_token_id if proxmox_api_token_id | length > 0 else omit }}"
+    api_token_secret: "{{ proxmox_api_token_secret if proxmox_api_token_secret | length > 0 else omit }}"
+    api_password: "{{ proxmox_api_password if proxmox_api_password | length > 0 else omit }}"
+    validate_certs: "{{ proxmox_validate_certs }}"
+    node: "{{ proxmox_node }}"
+    vmid: "{{ proxmox_vmid }}"
+    state: started
+  delegate_to: localhost
+  when: vm_state == 'present'
+
+- name: Stop and delete the VM (decommission)
+  community.proxmox.proxmox_kvm:
+    api_host: "{{ proxmox_api_host }}"
+    api_user: "{{ proxmox_api_user }}"
+    api_token_id: "{{ proxmox_api_token_id if proxmox_api_token_id | length > 0 else omit }}"
+    api_token_secret: "{{ proxmox_api_token_secret if proxmox_api_token_secret | length > 0 else omit }}"
+    api_password: "{{ proxmox_api_password if proxmox_api_password | length > 0 else omit }}"
+    validate_certs: "{{ proxmox_validate_certs }}"
+    node: "{{ proxmox_node }}"
+    vmid: "{{ proxmox_vmid }}"
+    state: absent
+    force: true
+  delegate_to: localhost
+  when: vm_state == 'absent'
+
+- name: Best-effort - query the guest's reported IP via QEMU Guest Agent
+  ansible.builtin.uri:
+    url: "https://{{ proxmox_api_host }}:8006/api2/json/nodes/{{ proxmox_node }}/qemu/{{ proxmox_vmid }}/agent/network-get-interfaces"
+    headers:
+      Authorization: "PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}"
+    validate_certs: "{{ proxmox_validate_certs }}"
+    status_code: [200, 500, 596]
+  register: proxmox_guest_agent_result
+  delegate_to: localhost
+  failed_when: false
+  when:
+    - vm_state == 'present'
+    - proxmox_api_token_id | length > 0
+  # Requires qemu-guest-agent installed AND running in the guest (agent:
+  # 1 set on the VM, which a decent template should already carry) —
+  # same "best-effort, may not be up yet" posture as vm_provision's
+  # Hyper-V IP lookup. Only works with token auth: a plain
+  # proxmox_api_password isn't a bearer credential this simple header can
+  # use directly (that needs a ticket/CSRF login call this role doesn't
+  # make) — skipped entirely if you're using password auth instead.
+
+- name: Extract the first reported IPv4 address, if the guest agent answered
+  ansible.builtin.set_fact:
+    proxmox_vm_ip: >-
+      {{ (proxmox_guest_agent_result.json.data.result
+          | default([])
+          | selectattr('name', 'ne', 'lo')
+          | map(attribute='ip-addresses', default=[])
+          | flatten
+          | selectattr('ip-address-type', 'equalto', 'ipv4')
+          | map(attribute='ip-address')
+          | list
+          | first) | default('not yet reported — qemu-guest-agent may still be starting, check the Proxmox UI directly') }}
+  when:
+    - vm_state == 'present'
+    - proxmox_guest_agent_result is defined
+    - proxmox_guest_agent_result.status | default(0) == 200
+
+- name: Ensure the provisioning output directory exists
+  ansible.builtin.file:
+    path: "{{ provisioning_output_dir }}"
+    state: directory
+    mode: "0750"
+  delegate_to: localhost
+  when: vm_state == 'present'
+
+- name: Write a reviewable inventory snippet (NOT the checked-in inventory itself)
+  ansible.builtin.copy:
+    dest: "{{ provisioning_output_dir }}/{{ vm_name }}.txt"
+    content: |
+      Generated by provisioning/vm_provision — review and fold the
+      relevant details into inventories/<env>/hosts.yml and a new
+      inventories/<env>/host_vars/{{ vm_name }}.yml yourself, as a normal
+      reviewed change (see docs/CHANGE_CONTROL.md). This file is not
+      consumed by anything automatically.
+
+      vm_name:      {{ vm_name }}
+      hypervisor:   proxmox ({{ proxmox_api_host }}, node {{ proxmox_node }}, vmid {{ proxmox_vmid }})
+      reported IP:  {{ proxmox_vm_ip | default('not queried — set proxmox_api_token_id/secret to enable the best-effort guest-agent lookup, or check the Proxmox UI directly') }}
+
+      Suggested host_vars/{{ vm_name }}.yml starting point:
+        ansible_host: "{{ proxmox_vm_ip | default('CHANGEME') }}"
+
+      Next steps once this host is reachable over SSH (see
+      docs/PROVISIONING.md for the full lifecycle):
+        1. playbooks/provision_automation_user.yml (creates the
+           non-root automation account this repo requires)
+        2. playbooks/site.yml (bootstrap + hardening + compliance evidence)
+        3. Whichever server_roles/apps playbooks this host actually needs
+    mode: "0644"
+  delegate_to: localhost
+  when: vm_state == 'present'

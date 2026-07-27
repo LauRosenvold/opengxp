@@ -14,15 +14,19 @@ collections:
   - name: redhat.rhel_system_roles
     version: "1.85.0"
   # provisioning/vm_provision (see docs/PROVISIONING.md) — VM creation
-  # against vCenter/Hyper-V, a fundamentally different kind of dependency
-  # from everything above: these two need Python libraries installed on
-  # the CONTROL NODE (wherever ansible-playbook actually runs), not on a
-  # managed target host, or the modules simply fail to import:
+  # against vCenter/Hyper-V/Proxmox VE, a fundamentally different kind of
+  # dependency from everything above: these three need Python libraries
+  # installed on the CONTROL NODE (wherever ansible-playbook actually
+  # runs), not on a managed target host, or the modules simply fail to
+  # import:
   #   - community.vmware needs `pyvmomi` (pip install pyvmomi, or your
   #     distro's equivalent) on the control node.
   #   - ansible.windows needs `pywinrm` (pip install "pywinrm>=0.3.0") on
   #     the control node for WinRM connections to the Hyper-V host to
   #     work at all.
+  #   - community.proxmox needs `proxmoxer` and `requests`
+  #     (pip install proxmoxer requests) on the control node for the PVE
+  #     REST API calls to work at all.
   - name: community.vmware
     version: "4.5.0"
   - name: ansible.windows
@@ -35,6 +39,17 @@ collections:
   # provisioning/dns_registration/defaults/main.yml's note.
   - name: community.windows
     version: "2.3.0"
+  # community.proxmox.proxmox_kvm / proxmox_disk
+  # (provisioning/vm_provision's Proxmox path) — a standalone collection,
+  # not community.general: Proxmox module maintenance moved out of
+  # community.general starting around its 9.x series (deprecated there,
+  # removal planned), so this pins the actively maintained home instead
+  # of the deprecated path already present via community.general above.
+  # Same "verify the exact parameter set against your installed version"
+  # caveat as community.windows — see
+  # provisioning/vm_provision/tasks/proxmox.yml's note.
+  - name: community.proxmox
+    version: "1.3.0"
 
 roles:
   # CIS Benchmark automation, maintained by ansible-lockdown.

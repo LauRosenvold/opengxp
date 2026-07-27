@@ -1,0 +1,42 @@
+---
+# Creates (or decommissions) a VM from a Proxmox VE template — see
+# docs/PROVISIONING.md for the full lifecycle this fits into (provision
+# -> playbooks/register_dns.yml -> playbooks/provision_automation_user.yml
+# -> playbooks/site.yml -> whichever server_roles/apps playbooks the new
+# host needs). Runs entirely from the Ansible control node against the
+# Proxmox REST API — no managed Linux host is involved, or even exists
+# yet, at this point.
+#
+# Requires proxmoxer and requests on the control node (pip install
+# proxmoxer requests) — see requirements.yml's note on
+# community.proxmox.
+#
+# Usage:
+#   ansible-playbook playbooks/provision_vm_proxmox.yml \
+#     -i inventories/staging/hosts.yml \
+#     -e vm_name=app08 \
+#     -e proxmox_api_host=pve01.gxp.example.internal \
+#     -e proxmox_node=pve01 \
+#     -e proxmox_template_vmid=9000 \
+#     -e proxmox_vmid=180 \
+#     -e proxmox_storage=local-lvm \
+#     -e proxmox_bridge=vmbr0 \
+#     -e proxmox_cloudinit_ip_config='ip=10.20.10.58/24,gw=10.20.10.1'
+#
+# Decommission:
+#   ansible-playbook playbooks/provision_vm_proxmox.yml \
+#     -i inventories/staging/hosts.yml \
+#     -e proxmox_api_host=pve01.gxp.example.internal \
+#     -e proxmox_node=pve01 -e proxmox_vmid=180 \
+#     -e vm_name=app08 -e vm_state=absent
+
+- name: Provision a VM from a Proxmox VE template
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    provisioning_hypervisor: proxmox
+
+  roles:
+    - role: vm_provision
+      tags: [provision, proxmox]

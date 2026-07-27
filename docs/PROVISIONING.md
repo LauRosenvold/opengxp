@@ -10,20 +10,21 @@ platforms — see [SERVER_ROLES.md](SERVER_ROLES.md)) -> `apps/`
 `provisioning/` sits **before all of them**, not below them. Every other
 tier configures a host that already exists and is reachable over
 SSH. `provisioning/vm_provision` does the opposite: it calls a
-**hypervisor management API** (vCenter or Hyper-V) to create the VM in
-the first place. There is no managed Linux host for Ansible to talk to
-yet — the "target" of this role is vCenter or a Hyper-V host, not the
-new VM itself.
+**hypervisor management API** (vCenter, Hyper-V, or Proxmox VE) to
+create the VM in the first place. There is no managed Linux host for
+Ansible to talk to yet — the "target" of this role is vCenter, a
+Hyper-V host, or a Proxmox node, not the new VM itself.
 
 That's a different enough kind of automation that it doesn't belong in
 any of the existing tiers:
 
-- It runs from the control node (vCenter) or against the *hypervisor*
-  host via WinRM (Hyper-V) — never via SSH to the thing being created.
+- It runs from the control node against a management API (vCenter,
+  Proxmox VE) or against the *hypervisor* host via WinRM (Hyper-V) —
+  never via SSH to the thing being created.
 - It needs Python libraries on the **control node** (`pyvmomi`,
-  `pywinrm`) rather than packages on a managed target — a first for this
-  repo, worth calling out clearly rather than burying in a role's
-  comments.
+  `pywinrm`, `proxmoxer`/`requests`) rather than packages on a managed
+  target — a first for this repo, worth calling out clearly rather than
+  burying in a role's comments.
 - Its output feeds the *start* of the lifecycle every other tier assumes
   already happened, not a step within it.
 
@@ -36,7 +37,7 @@ role established for Hyper-V. See [PKI_DNS.md](PKI_DNS.md) for both.
 ## The full lifecycle
 
 ```
-provisioning/vm_provision          create the VM (vCenter or Hyper-V)
+provisioning/vm_provision          create the VM (vCenter, Hyper-V, or Proxmox VE)
         |
         v
 provisioning/dns_registration       give it a resolvable DNS name (see PKI_DNS.md)
@@ -69,11 +70,11 @@ edit; this role doesn't presume to make that change for you.
 
 ## `vm_provision`
 
-One role, two task files (`tasks/vcenter.yml`, `tasks/hyperv.yml`),
-dispatched by `provisioning_hypervisor` — set explicitly at the play
-level in each of the two playbooks below rather than left to the
-role's own default, so running the "wrong" playbook for your hypervisor
-can't silently do nothing.
+One role, three task files (`tasks/vcenter.yml`, `tasks/hyperv.yml`,
+`tasks/proxmox.yml`), dispatched by `provisioning_hypervisor` — set
+explicitly at the play level in each of the three playbooks below rather
+than left to the role's own default, so running the "wrong" playbook for
+your hypervisor can't silently do nothing.
 
 ### vCenter — `playbooks/provision_vm_vcenter.yml`
 
@@ -130,25 +131,73 @@ need `ansible_winrm_transport: credssp` (and CredSSP enabled on both
 ends) in that case. A local path avoids the whole problem; prefer that
 if you can.
 
+### Proxmox VE — `playbooks/provision_vm_proxmox.yml`
+
+Uses `community.proxmox.proxmox_kvm`/`proxmox_disk` against the Proxmox
+REST API, running on `localhost` — architecturally closer to the vCenter
+path than to Hyper-V's WinRM one, since Proxmox exposes a management API
+directly rather than requiring an agent-style connection to the
+hypervisor host itself.
+
+**Explicit VMIDs, no auto-assignment.** Proxmox clones by numeric VMID,
+not name (names aren't even guaranteed unique). `proxmox_template_vmid`
+(the source) and `proxmox_vmid` (the new VM) are both required —
+deliberately no "let Proxmox pick the next free ID" fallback, so the ID
+that ends up in a change ticket is always the one an operator actually
+typed, not something this role guessed on your behalf.
+
+**Guest customization via cloud-init**, if the template has a cloud-init
+drive already configured (`qm set <vmid> --ide2 <storage>:cloudinit`
+when the template was built) — set `proxmox_cloudinit_ip_config` (and
+optionally `_nameserver`/`_searchdomain`/`_sshkeys`/`_user`) to use it;
+leave it empty to skip entirely and let the template's own defaults
+apply, same posture as vCenter's `vcenter_network_type: dhcp` default.
+This role does not add a cloud-init drive to a template that doesn't
+already have one.
+
+**Full vs. linked clones.** `proxmox_full_clone: true` is the default —
+an independent copy of the template's disk. Setting it `false` creates a
+linked clone instead: faster and smaller, but permanently dependent on
+the source template's disk continuing to exist, which is a fragile
+production posture this role doesn't default to.
+
+**Extra disk.** `vm_extra_disk_gb > 0` attaches an additional disk at
+`scsi1` via `community.proxmox.proxmox_disk` after the clone — verify
+your template's boot disk is actually `scsi0` (the common default) if
+you're getting a collision.
+
+**Best-effort guest IP lookup**, via the QEMU Guest Agent's REST
+endpoint — requires `agent: 1` set on the VM and the guest agent
+actually running in the template (a decent template should already
+carry both), and only works with API-token auth (password auth has no
+simple bearer credential this role's direct API call can use). Same
+"may not be up yet, check the UI directly" posture as the Hyper-V IP
+lookup.
+
+**Control-node prerequisite**: `pip install proxmoxer requests` wherever
+`ansible-playbook` runs — `proxmoxer` is what actually talks to the PVE
+API; the module fails to import without it.
+
 ## Decommissioning (`vm_state: absent`)
 
-Both hypervisor paths support removing a VM — power off (Hyper-V:
-`Stop-VM -TurnOff -Force`; vCenter: `force: true` on the delete call) and
-delete its disks. This is a genuinely destructive, hard-to-reverse
-action; nothing about `vm_state: absent` prompts for confirmation beyond
-what running the playbook itself already implies, so treat it with the
-same care as `git reset --hard` or dropping a database table — confirm
-you have the right `vm_name` before running it, especially since VM
-names aren't validated against anything except "did a VM with this exact
-name exist."
+All three hypervisor paths support removing a VM — power off (Hyper-V:
+`Stop-VM -TurnOff -Force`; vCenter: `force: true` on the delete call;
+Proxmox: `force: true` stops then deletes) and delete its disks. This is
+a genuinely destructive, hard-to-reverse action; nothing about
+`vm_state: absent` prompts for confirmation beyond what running the
+playbook itself already implies, so treat it with the same care as `git
+reset --hard` or dropping a database table — confirm you have the right
+`vm_name`/`proxmox_vmid` before running it, especially since VM names
+aren't validated against anything except "did a VM with this exact name
+(or, for Proxmox, this exact ID) exist."
 
 ## The `localhost` inventory entry
 
 `inventories/<env>/hosts.yml` now has an explicit `localhost` entry
 (`ansible_connection: local`) rather than relying on Ansible's ad-hoc
 "implicit localhost" behavior — explicit so `group_vars/all.yml`'s
-vCenter connection vars reliably apply to it, which implicit localhost
-handling doesn't reliably guarantee.
+vCenter/Proxmox connection vars reliably apply to it, which implicit
+localhost handling doesn't reliably guarantee.
 
 **This has a consequence for every existing `hosts: all` playbook**:
 `bootstrap.yml`, `hardening.yml`, `compliance_scan.yml`,
@@ -164,15 +213,16 @@ Satellite-register, or AD-join whatever machine happens to be running
 ## What's intentionally out of scope
 
 - **Cloud providers** (AWS/Azure/GCP/etc.) — this was specifically asked
-  for as on-prem vCenter and Hyper-V; a cloud provisioning path is a
-  different set of collections/modules (and IAM/credential model)
-  entirely, not a small extension of this role.
-- **Building or maintaining the golden template itself** — both paths
-  assume a template (vCenter) or exported template VM (Hyper-V) already
-  exists and is kept current (patched, hardened baseline pre-applied if
-  you want a head start, correct guest tools installed). Template
-  lifecycle — how often it's rebuilt, from what, by whom — is a
-  separate, real process this repo doesn't attempt to own.
+  for as on-prem vCenter, Hyper-V, and Proxmox VE; a cloud provisioning
+  path is a different set of collections/modules (and IAM/credential
+  model) entirely, not a small extension of this role.
+- **Building or maintaining the golden template itself** — all three
+  paths assume a template (vCenter, Proxmox) or exported template VM
+  (Hyper-V) already exists and is kept current (patched, hardened
+  baseline pre-applied if you want a head start, correct guest
+  tools/cloud-init installed). Template lifecycle — how often it's
+  rebuilt, from what, by whom — is a separate, real process this repo
+  doesn't attempt to own.
 - **Automatic inventory registration** — see "The full lifecycle" above;
   folding a newly created host into the checked-in inventory is a
   deliberate, separate, reviewed change.
