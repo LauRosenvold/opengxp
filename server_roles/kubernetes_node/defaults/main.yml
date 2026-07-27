@@ -19,6 +19,41 @@
 k8s_version: "1.31"                # minor version only, selects the repo
 k8s_package_version: ""             # exact NEVRA suffix (e.g. "1.31.4-*"); empty = latest patch in that minor's repo
 
+# 1.28 through 1.34 — deliberately an explicit, enumerated list rather
+# than a floating min/max range check, same "widening this is itself a
+# reviewed change" posture as ansible-lockdown.RHEL9-CIS/RHEL10-CIS in
+# requirements.yml. tasks/main.yml fails loudly if k8s_version isn't in
+# this list, rather than silently attempting a repo/kubeadm-config
+# combination nobody has actually reasoned about. Extending it to a new
+# minor (e.g. 1.35) is a normal PR — add it here once you've verified
+# the kubeadm config API version logic below still holds, and re-checked
+# the CNI/MetalLB compatibility note further down.
+k8s_supported_versions:
+  - "1.28"
+  - "1.29"
+  - "1.30"
+  - "1.31"
+  - "1.32"
+  - "1.33"
+  - "1.34"
+
+# kubeadm's own config API moved from v1beta3 to v1beta4 in Kubernetes
+# 1.31 (v1beta4 became the default `kubeadm config print init-defaults`
+# output that release) and v1beta3 was REMOVED entirely in 1.32 — kubeadm
+# 1.32+ cannot parse a v1beta3 document at all, it's not just a
+# deprecation warning. This is why templates/kubeadm-config.yaml.j2
+# renders two structurally different documents rather than one shared
+# shape: v1beta4 also changed apiServer/controllerManager/scheduler.
+# extraArgs and nodeRegistration.kubeletExtraArgs from a map to a list of
+# {name, value} pairs. Written from documented kubeadm behavior, not
+# tested against every patch release in k8s_supported_versions above —
+# verify with `kubeadm config migrate` (or the kubeadm API reference for
+# whichever kubeadm version you actually installed) before relying on
+# either branch in production, same posture as every other
+# "verify against your installed version" caveat in this repo (e.g.
+# provisioning/dns_registration's win_dns_record note).
+k8s_kubeadm_api_version: "{{ 'v1beta4' if k8s_version is version('1.31', '>=') else 'v1beta3' }}"
+
 # roles/patch_management runs a fleet-wide `dnf update *` on its own
 # schedule (see playbooks/patch_management.yml). Kubernetes version
 # changes must be a deliberate, tested, ticketed action (kubeadm doesn't
@@ -113,6 +148,15 @@ k8s_cni_provider: calico   # calico | flannel
 # specifically — Flannel's ConfigMap is a clean string substitution,
 # Calico's requires uncommenting a block and is best-effort against
 # whatever manifest format the pinned tag below actually ships).
+#
+# NOT automatically kept in step with k8s_version above. These tags were
+# validated against the middle of k8s_supported_versions, not its full
+# 1.28-1.34 span — a CNI/LB release that predates your chosen
+# k8s_version by a wide margin (older end) or postdates these pins by a
+# long way (1.32-1.34) may not actually support it. Check each project's
+# own published Kubernetes-compatibility matrix for whichever
+# k8s_version you're deploying and bump the tag here if needed — this
+# role does not (and can't reliably) cross-reference that for you.
 k8s_cni_manifest_url_by_provider:
   calico: "https://raw.githubusercontent.com/projectcalico/calico/v3.28.0/manifests/calico.yaml"
   flannel: "https://github.com/flannel-io/flannel/releases/download/v0.25.5/kube-flannel.yml"
@@ -124,6 +168,9 @@ k8s_cni_manifest_url: "{{ k8s_cni_manifest_url_by_provider[k8s_cni_provider] }}"
 # is wired up: no BGP router configuration required, works on any flat
 # L2 network, which is the common case for an on-prem estate. BGP mode is
 # a documented gap, not implemented here — see docs/SERVER_ROLES.md.
+# Same "not automatically matched to k8s_version" caveat as the CNI
+# manifests above — verify against MetalLB's own compatibility notes for
+# whichever k8s_version you're deploying.
 k8s_metallb_enabled: false
 k8s_metallb_manifest_url: "https://raw.githubusercontent.com/metallb/metallb/v0.14.8/config/manifests/metallb-native.yaml"
 k8s_metallb_address_pools: []

@@ -94,10 +94,10 @@ see [docs/PKI_DNS.md](docs/PKI_DNS.md)):
 
 | Platform | Version | Notes |
 |---|---|---|
-| Kubernetes | 1.31 (minor only — pins the `pkgs.k8s.io` repo) | `k8s_version` in `inventories/<env>/group_vars/k8s_nodes.yml` |
-| Calico (CNI) | v3.28.0 | `k8s_cni_manifest_url_by_provider` |
-| Flannel (CNI) | v0.25.5 | `k8s_cni_manifest_url_by_provider` |
-| MetalLB | v0.14.8 | off by default, L2 mode only |
+| Kubernetes | 1.28 - 1.34 (minor only — pins the `pkgs.k8s.io` repo; `k8s_supported_versions` in `defaults/main.yml` enumerates exactly these) | `k8s_version` in `inventories/<env>/group_vars/k8s_nodes.yml`; kubeadm config renders as v1beta3 below 1.31, v1beta4 from 1.31 on (mandatory from 1.32) — see [docs/SERVER_ROLES.md](docs/SERVER_ROLES.md) |
+| Calico (CNI) | v3.28.0 | `k8s_cni_manifest_url_by_provider` — validated mid-range, not automatically matched to `k8s_version`; verify/bump for versions toward either end of 1.28-1.34 |
+| Flannel (CNI) | v0.25.5 | same caveat as Calico above |
+| MetalLB | v0.14.8 | off by default, L2 mode only; same "not auto-matched to `k8s_version`" caveat |
 | PostgreSQL (PGDG) | 16 | `postgresql_version` |
 | Docker CE | latest from the distro-appropriate `docker-ce` repo | not independently version-pinned — tracks whatever that repo currently ships |
 
@@ -181,13 +181,17 @@ environment differs:
   different cadence, not part of `playbooks/site.yml` — see
   [docs/SERVER_ROLES.md](docs/SERVER_ROLES.md).
 - **Kubernetes means vanilla kubeadm**, not OpenShift/k3s/a managed cloud
-  offering. SELinux stays enforcing (no `setenforce 0`) regardless of
+  offering, supporting 1.28-1.34 (`k8s_supported_versions` — the kubeadm
+  config template is API-version-aware, v1beta3 below 1.31 and v1beta4
+  from 1.31 on, since kubeadm itself can't parse v1beta3 at all from 1.32
+  onward). SELinux stays enforcing (no `setenforce 0`) regardless of
   container runtime (containerd or CRI-O, pluggable), CNI (Calico or
   Flannel, pluggable) and any HA control-plane load balancer are
   bring-your-own, MetalLB (bare-metal `LoadBalancer` Services) is
   available but off by default and L2-mode-only, and version changes go
-  through an explicitly-gated upgrade playbook, never routine patching —
-  see [docs/SERVER_ROLES.md](docs/SERVER_ROLES.md)'s `kubernetes_node`
+  through an explicitly-gated, one-minor-at-a-time upgrade playbook,
+  never routine patching — see
+  [docs/SERVER_ROLES.md](docs/SERVER_ROLES.md)'s `kubernetes_node`
   section before using this on anything real.
 - **PostgreSQL means PGDG packages** (not the OS's AppStream module),
   with pgAudit on by default for a GxP-relevant SQL-level audit trail.

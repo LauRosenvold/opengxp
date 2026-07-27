@@ -147,8 +147,39 @@ Kubernetes' own package repos (`pkgs.k8s.io`) are versioned per **minor**
 version — there is no floating "latest" repo, by design upstream. This
 role's `k8s_version` var (set in `group_vars/k8s_nodes.yml`, the whole
 cluster should agree on one version outside of a deliberate upgrade)
-picks which minor-version repo a node group uses. Two consequences worth
-understanding before you touch this:
+picks which minor-version repo a node group uses. `k8s_supported_versions`
+in `defaults/main.yml` enumerates exactly which minors this role has
+actually been reasoned about — **1.28 through 1.34** — and
+`tasks/main.yml` fails loudly up front if `k8s_version` isn't one of
+them, rather than silently attempting a repo/kubeadm-config combination
+nobody has verified.
+
+**The kubeadm config API version is derived, not fixed.** kubeadm moved
+its own config format from `v1beta3` to `v1beta4` in Kubernetes 1.31
+(`v1beta4` became the default that release; `v1beta3` was **removed**
+entirely in 1.32 — kubeadm 1.32+ cannot parse a v1beta3 document at all,
+this isn't just a deprecation warning). `k8s_kubeadm_api_version`
+(`defaults/main.yml`, `v1beta4` for `k8s_version >= 1.31`, `v1beta3`
+below that) picks which of `templates/kubeadm-config.yaml.j2`'s two
+structurally different documents gets rendered — v1beta4 also changed
+`apiServer`/`controllerManager`/`scheduler.extraArgs` and
+`nodeRegistration.kubeletExtraArgs` from a map to a list of `{name,
+value}` pairs, so this isn't a one-line apiVersion bump. Written from
+documented kubeadm behavior, not tested against every patch release in
+`k8s_supported_versions` — verify with `kubeadm config migrate` (or the
+kubeadm API reference for whichever kubeadm version you actually
+installed) before relying on either branch in production.
+
+**CNI/MetalLB manifest pins are not automatically kept in step with
+`k8s_version`.** `k8s_cni_manifest_url_by_provider` and
+`k8s_metallb_manifest_url` (`defaults/main.yml`) were validated against
+the middle of the newly-supported range, not its full 1.28-1.34 span —
+check Calico's/Flannel's/MetalLB's own published Kubernetes-compatibility
+matrix for whichever `k8s_version` you're actually deploying, especially
+at the 1.32-1.34 end, and bump the pinned tag if needed. This role can't
+reliably cross-reference that compatibility matrix for you.
+
+Two more consequences worth understanding before you touch any of this:
 
 - **Different node pools can genuinely run different minor versions** —
   set `k8s_version` in `host_vars` for a specific subset of workers if
@@ -161,9 +192,17 @@ understanding before you touch this:
   `roles/patch_management` runs a fleet-wide `dnf update *`; this role
   applies `dnf versionlock` to `kubeadm`/`kubelet`/`kubectl` specifically
   so that never touches them — a version change only happens through
-  `playbooks/kubernetes_upgrade.yml`, deliberately, one version at a
-  time, with `k8s_upgrade_confirmed=true` required (same gate pattern as
-  `roles/fips_mode`).
+  `playbooks/kubernetes_upgrade.yml`, deliberately, **one minor version at
+  a time**, with `k8s_upgrade_confirmed=true` required (same gate pattern
+  as `roles/fips_mode`) — kubeadm doesn't support skipping a minor in a
+  single `kubeadm upgrade apply` either, and `tasks/upgrade.yml` now
+  asserts `k8s_target_version_full`'s minor matches `k8s_version` before
+  doing anything, so forgetting to bump `k8s_version` first — as this
+  role's own upgrade playbook header already instructs — fails loudly
+  instead of silently upgrading the wrong thing. Spanning the full
+  1.28-1.34 range end to end means six separate, sequential, ticketed
+  upgrade runs, not
+  one.
 
 ### Node setup: control-plane vs. worker
 

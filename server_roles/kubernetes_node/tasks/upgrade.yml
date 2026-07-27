@@ -17,6 +17,28 @@
       k8s_target_version_full=<full version, e.g. 1.31.4> — see
       playbooks/kubernetes_upgrade.yml.
 
+- name: Derive the target minor version from k8s_target_version_full
+  ansible.builtin.set_fact:
+    k8s_target_minor_version: "{{ k8s_target_version_full.split('.')[0] }}.{{ k8s_target_version_full.split('.')[1] }}"
+
+- name: Fail loudly if the target minor isn't supported, or k8s_version wasn't bumped first
+  ansible.builtin.assert:
+    that:
+      - k8s_target_minor_version in k8s_supported_versions
+      - k8s_target_minor_version == k8s_version
+    fail_msg: >-
+      k8s_target_version_full ({{ k8s_target_version_full }}) targets
+      minor {{ k8s_target_minor_version }}, but k8s_version is still
+      "{{ k8s_version }}" and/or {{ k8s_target_minor_version }} isn't in
+      k8s_supported_versions ({{ k8s_supported_versions | join(', ') }}).
+      Update k8s_version in inventories/<env>/group_vars/k8s_nodes.yml to
+      {{ k8s_target_minor_version }} first (this playbook's header
+      comment already says so — this just enforces it) — kubeadm only
+      supports upgrading one minor version at a time regardless, so
+      spanning k8s_supported_versions' full 1.28-1.34 range means one
+      k8s_target_version_full/k8s_version bump per minor, run
+      sequentially, never in a single jump.
+
 - name: Remove versionlock so the upgrade can actually install a new version
   ansible.builtin.command: dnf versionlock delete kubeadm kubelet kubectl
   register: k8s_versionlock_remove_result

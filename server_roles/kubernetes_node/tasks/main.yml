@@ -9,6 +9,18 @@
 # add `serial:` to that play, and don't split this into multiple plays —
 # either would risk breaking that ordering guarantee.
 
+- name: Fail loudly if k8s_version is outside the range this role supports
+  ansible.builtin.assert:
+    that:
+      - k8s_version in k8s_supported_versions
+    fail_msg: >-
+      k8s_version is "{{ k8s_version }}", which isn't in
+      k8s_supported_versions ({{ k8s_supported_versions | join(', ') }}) —
+      see defaults/main.yml. Extending support to a new minor version is
+      a deliberate change (verify the kubeadm config API version logic
+      and the CNI/MetalLB compatibility notes there first), not
+      something to silently attempt.
+
 - name: Configure the Kubernetes package repo (CRI-agnostic)
   ansible.builtin.include_tasks: repo.yml
   tags: [prep]

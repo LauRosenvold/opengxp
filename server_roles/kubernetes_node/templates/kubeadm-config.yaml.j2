@@ -1,4 +1,72 @@
 # {{ ansible_managed | default('Managed by Ansible — server_roles/kubernetes_node') }}
+# Branches on k8s_kubeadm_api_version (derived from k8s_version — see
+# defaults/main.yml) rather than templating one shared shape: v1beta4
+# (Kubernetes 1.31+, mandatory from 1.32 since kubeadm can no longer
+# parse v1beta3 at all) changed apiServer/controllerManager/scheduler.
+# extraArgs and nodeRegistration.kubeletExtraArgs from a map to a list of
+# {name, value} pairs, not just an apiVersion string bump. See
+# defaults/main.yml's k8s_kubeadm_api_version comment for the verification
+# caveat before relying on either branch in production.
+{% if k8s_kubeadm_api_version == 'v1beta4' %}
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: InitConfiguration
+localAPIEndpoint:
+  advertiseAddress: {{ ansible_default_ipv4.address }}
+  bindPort: {{ k8s_apiserver_bind_port }}
+nodeRegistration:
+  criSocket: {{ k8s_container_runtime_endpoint }}
+  kubeletExtraArgs:
+    - name: node-ip
+      value: {{ ansible_default_ipv4.address }}
+---
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: ClusterConfiguration
+kubernetesVersion: "{{ k8s_installed_version }}"
+controlPlaneEndpoint: "{{ k8s_control_plane_endpoint if k8s_control_plane_endpoint | length > 0 else ansible_default_ipv4.address ~ ':' ~ k8s_apiserver_bind_port }}"
+networking:
+  podSubnet: {{ k8s_pod_network_cidr }}
+  serviceSubnet: {{ k8s_service_cidr }}
+apiServer:
+  extraArgs:
+{% for key, value in k8s_apiserver_extra_args.items() %}
+    - name: {{ key }}
+      value: "{{ value }}"
+{% endfor %}
+{% if k8s_encryption_at_rest_enabled %}
+    - name: encryption-provider-config
+      value: "/etc/kubernetes/encryption-config.yaml"
+{% endif %}
+  extraVolumes:
+    - name: audit-policy
+      hostPath: /etc/kubernetes/audit-policy.yaml
+      mountPath: /etc/kubernetes/audit-policy.yaml
+      readOnly: true
+      pathType: File
+    - name: audit-logs
+      hostPath: /var/log/kubernetes/audit
+      mountPath: /var/log/kubernetes/audit
+      readOnly: false
+      pathType: DirectoryOrCreate
+{% if k8s_encryption_at_rest_enabled %}
+    - name: encryption-config
+      hostPath: /etc/kubernetes/encryption-config.yaml
+      mountPath: /etc/kubernetes/encryption-config.yaml
+      readOnly: true
+      pathType: File
+{% endif %}
+controllerManager:
+  extraArgs:
+{% for key, value in k8s_controller_manager_extra_args.items() %}
+    - name: {{ key }}
+      value: "{{ value }}"
+{% endfor %}
+scheduler:
+  extraArgs:
+{% for key, value in k8s_scheduler_extra_args.items() %}
+    - name: {{ key }}
+      value: "{{ value }}"
+{% endfor %}
+{% else %}
 apiVersion: kubeadm.k8s.io/v1beta3
 kind: InitConfiguration
 localAPIEndpoint:
@@ -52,6 +120,7 @@ scheduler:
 {% for key, value in k8s_scheduler_extra_args.items() %}
     {{ key }}: "{{ value }}"
 {% endfor %}
+{% endif %}
 ---
 apiVersion: kubelet.config.k8s.io/v1beta1
 kind: KubeletConfiguration
