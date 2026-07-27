@@ -26,6 +26,80 @@ tickets, IQ/OQ/PQ sign-off, periodic review) your Quality organization
 must run around it. See [docs/VALIDATION.md](docs/VALIDATION.md) for how
 the two fit together.
 
+## Supported Versions
+
+Every version below is pinned somewhere in this repo — `requirements.yml`
+for collections/roles, a role's own `defaults/main.yml` for
+software/image versions, or a role's `meta/main.yml` for the target
+platform. Bumping any of them is itself a change-controlled event (see
+[docs/CHANGE_CONTROL.md](docs/CHANGE_CONTROL.md)), not a drive-by
+dependency update.
+
+**Managed operating systems** (`roles/`, `server_roles/`, `apps/`):
+
+| OS | Versions | Notes |
+|---|---|---|
+| RHEL | 9, 10 | `rhel9`/`rhel10` inventory groups — see [docs/BASELINE_MAPPING.md](docs/BASELINE_MAPPING.md) |
+| AlmaLinux | 9, 10 | `almalinux9`/`almalinux10` inventory groups, binary-compatible with the matching RHEL major version |
+
+Python interpreter: `python3.9` on the EL9 family (RHEL 9 / AlmaLinux 9),
+`python3.12` on the EL10 family (RHEL 10 / AlmaLinux 10) — set per OS
+group in `inventories/<env>/group_vars/`.
+
+**Control node**: `ansible-core >= 2.15` (every role's `min_ansible_version`).
+No specific control-node OS is required, but several roles need Python
+libraries or CLI tools installed there specifically, not on a managed
+target — see [docs/PROVISIONING.md](docs/PROVISIONING.md) and
+[docs/PKI_DNS.md](docs/PKI_DNS.md):
+
+| Tool | Needed by | Install |
+|---|---|---|
+| `pyvmomi` | `provisioning/vm_provision` (vCenter) | `pip install pyvmomi` |
+| `pywinrm` | `provisioning/vm_provision` (Hyper-V), `provisioning/dns_registration`, `provisioning/certificate_enrollment` | `pip install "pywinrm>=0.3.0"` |
+| `proxmoxer`, `requests` | `provisioning/vm_provision` (Proxmox VE) | `pip install proxmoxer requests` |
+| `openssl` (CLI) | `apps/netbox`, `apps/registry`, `apps/nginx`, `provisioning/certificate_enrollment` | usually already present |
+| `ssh-keygen` (CLI) | `playbooks/rotate_automation_user_key.yml` | part of any OpenSSH client install |
+
+**Hypervisors / VM provisioning** (`provisioning/vm_provision` — see
+[docs/PROVISIONING.md](docs/PROVISIONING.md)):
+
+| Hypervisor | Collection | Version pinned | Server version |
+|---|---|---|---|
+| VMware vCenter | `community.vmware` | 4.5.0 | Not independently pinned — whatever vSphere version that collection release supports; verify against your estate before relying on it |
+| Microsoft Hyper-V | `ansible.windows` | 2.4.0 | Not independently pinned — same caveat |
+| Proxmox VE | `community.proxmox` | 1.3.0 | Not independently pinned — same caveat, see that role's note on verifying the exact module parameter set too |
+
+**Windows infrastructure** (`dns_servers`/`ca_servers` inventory groups —
+see [docs/PKI_DNS.md](docs/PKI_DNS.md)):
+
+| Component | Versions | Collection |
+|---|---|---|
+| Windows Server (DNS Server role) | 2019, 2022 | `community.windows` 2.3.0 (`win_dns_record`) |
+| Windows Server (Active Directory Certificate Services) | 2019, 2022 | n/a — `certreq`/`certutil` (built-in Windows tools), driven over WinRM |
+
+**Workload platforms** (`server_roles/` — see
+[docs/SERVER_ROLES.md](docs/SERVER_ROLES.md)):
+
+| Platform | Version | Notes |
+|---|---|---|
+| Kubernetes | 1.31 (minor only — pins the `pkgs.k8s.io` repo) | `k8s_version` in `inventories/<env>/group_vars/k8s_nodes.yml` |
+| Calico (CNI) | v3.28.0 | `k8s_cni_manifest_url_by_provider` |
+| Flannel (CNI) | v0.25.5 | `k8s_cni_manifest_url_by_provider` |
+| MetalLB | v0.14.8 | off by default, L2 mode only |
+| PostgreSQL (PGDG) | 16 | `postgresql_version` |
+| Docker CE | latest from the distro-appropriate `docker-ce` repo | not independently version-pinned — tracks whatever that repo currently ships |
+
+**Application container images** (`apps/`):
+
+| App | Image | Notes |
+|---|---|---|
+| NetBox | `netboxcommunity/netbox:v4.1-3.0.2` | `apps/netbox` |
+| NetBox's bundled Redis | `redis:7-alpine` | cache + task queue, always containerized |
+| NetBox's bundled PostgreSQL | `postgres:16-alpine` | lab/evaluation fallback only — see [docs/APPS.md](docs/APPS.md) |
+| Private registry | `registry:2.8.3` (`distribution/distribution`) | `apps/registry` |
+| Registry web UI | `docker-registry-ui:2.5.7` | optional, loopback-bound by default |
+| nginx (standalone and NetBox's reverse-proxy sidecar) | `nginxinc/nginx-unprivileged:1.27-alpine` | `apps/nginx`, `apps/netbox` |
+
 ## Assumptions baked into this design
 
 These were explicit decisions, not defaults — revisit them if your
