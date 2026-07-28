@@ -1,0 +1,12 @@
+# {{ ansible_managed | default('Managed by Ansible — server_roles/kubernetes_node') }}
+# Overrides kubeadm's packaged kubelet unit entirely for a k8s_etcd
+# host — that unit's own ExecStart expects
+# /var/lib/kubelet/kubeconfig (created by a real `kubeadm init`/`join`),
+# which never happens here. Written from the official kubeadm
+# external-etcd guide's own systemd drop-in, not tested against every
+# kubelet release in k8s_supported_versions — verify against your
+# installed version if kubelet fails to start.
+[Service]
+ExecStart=
+ExecStart=/usr/bin/kubelet --config=/etc/kubernetes/etcd-kubelet-config.yaml
+Restart=always

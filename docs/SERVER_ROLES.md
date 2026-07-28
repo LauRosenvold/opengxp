@@ -224,6 +224,71 @@ one thing to keep in sync, not two:
   strategy's per-task synchronization across hosts for correct ordering.
   See `tasks/main.yml`'s header comment before changing that structure.
 
+### External (non-stacked) etcd
+
+Off by default (`k8s_external_etcd_enabled: false`) — kubeadm's default
+"stacked" topology, one etcd member co-located on each
+`k8s_control_plane` node as a static pod, needs nothing described here
+at all. Turning it on switches to kubeadm's own documented external-etcd
+mechanism instead: a dedicated etcd cluster on its own hosts (the
+`k8s_etcd` inventory group, a third child of `k8s_nodes` alongside
+`k8s_control_plane`/`k8s_workers` — populate it with an odd number of
+hosts, 3 or 5, for real quorum tolerance) that the control plane's API
+servers connect to as clients, fully decoupled from control-plane node
+lifecycle. Worth it once you're running more than a handful of
+control-plane nodes, or want to replace/upgrade a control-plane node
+without ever touching etcd cluster membership.
+
+- **`k8s_etcd` hosts never run `kubeadm init`/`kubeadm join`, and never
+  become a Kubernetes API object** (no `Node` registers for them) —
+  they run a **standalone kubelet** (a systemd drop-in,
+  `tasks/etcd_local.yml`/`templates/etcd-kubelet-dropin.conf.j2`,
+  overrides kubeadm's packaged unit entirely, since the packaged one
+  expects a `/var/lib/kubelet/kubeconfig` a real join would have
+  created) whose only job is watching `/etc/kubernetes/manifests/` for
+  the etcd static pod kubeadm generates
+  (`kubeadm init phase etcd local`). They still need the same
+  repo/container-runtime/node-prep prep every other node in this role
+  gets — etcd itself runs as a container, same as everything else
+  kubeadm manages.
+- **Certs are generated once and distributed via the control node,
+  never directly between managed hosts.** The etcd CA is generated on
+  the first `k8s_etcd` host, fetched to
+  `artifacts/k8s_etcd_ca/` (control-node-local, `*.key` already
+  `.gitignore`'d), then copied out to every other `k8s_etcd` host so
+  they can all sign server/peer certs from the same CA. The single
+  `apiserver-etcd-client` cert/key (the credential every API server
+  uses to talk to etcd) is generated the same way and distributed to
+  every `k8s_control_plane` host, first or joining
+  (`tasks/external_etcd_certs.yml`) — this repo never assumes managed
+  hosts trust each other's SSH keys, only the control node's, so
+  fetch-then-copy through the control node is the only cross-host
+  distribution mechanism used anywhere in this repo (see
+  `provisioning/certificate_enrollment` for the same posture applied to
+  a completely different kind of certificate).
+- **Task order matters even more here than usual.** `tasks/main.yml`
+  runs `etcd_local.yml` (bootstrap the etcd cluster) before
+  `external_etcd_certs.yml` (copy its output onto every control-plane
+  host) before `control_plane_init.yml` (which needs those certs
+  already in place for `templates/kubeadm-config.yaml.j2`'s
+  `etcd.external` block to mean anything) — all three rely on the same
+  "one flat play, no `serial:`, linear-strategy task-boundary sync"
+  mechanism this role already used for control-plane-then-worker
+  ordering. `playbooks/kubernetes_cluster.yml`'s `hosts:` line now
+  includes `k8s_etcd` for exactly this reason.
+- **Bootstrap only — this does not manage etcd cluster membership
+  changes.** `tasks/etcd_local.yml` assumes it's initializing a FRESH
+  cluster (`initial-cluster-state: new`, every member started
+  together). Adding a member to an already-running external etcd
+  cluster, or replacing a failed one, is a manual `etcdctl member
+  add`/`remove` procedure — a documented gap, same posture as this
+  role's HA-control-plane-load-balancer note and
+  `postgresql_server`/`mssql_server`'s "no Patroni/Always On"
+  scoping. There is also no etcd health-check wiring
+  (`etcdctl` isn't installed by this role at all) —
+  `tasks/etcd_local.yml`'s final report tells you to check
+  `crictl ps`/`journalctl -u kubelet` on each `k8s_etcd` host directly.
+
 ### Things that are NOT obvious and will bite you if skipped
 
 - **SELinux stays enforcing regardless of which runtime you pick.**
@@ -317,10 +382,15 @@ one thing to keep in sync, not two:
   metal" is close enough to core cluster function to matter for a
   "generic workloads" cluster, unlike an Ingress controller's routing
   policy which is genuinely workload-specific.)
-- **Multi-cluster federation, etcd running external to the control-plane
-  nodes (stacked etcd only), and non-kubeadm installation methods**
+- **Multi-cluster federation and non-kubeadm installation methods**
   (kOps, Cluster API, managed cloud Kubernetes). All valid approaches,
   none of them "vanilla kubeadm," which is specifically what was asked for.
+- **External etcd cluster membership changes** (adding/replacing a
+  member after the initial bootstrap) and **etcd health-check tooling**
+  (no `etcdctl` install/wiring) — see the "External (non-stacked) etcd"
+  section above. Initial bootstrap of a fresh external etcd cluster
+  itself is in scope (`k8s_external_etcd_enabled`); ongoing membership
+  operations are not.
 
 ## `postgresql_server`
 
@@ -557,3 +627,89 @@ stable naming formula to generalize.
   the broader SQL Server platform.
 - **Multiple SQL Server instances on one host** — one instance per host
   is the assumed topology, same posture as `postgresql_server`.
+
+## `etcd_cluster`
+
+A standalone etcd cluster — plain upstream etcd, downloaded as a pinned,
+checksum-verified GitHub release tarball (`etcd_version`/
+`etcd_release_sha256` in `defaults/main.yml`), with its own role-owned
+systemd unit. **No Kubernetes tooling is involved anywhere in this
+role** — no kubeadm, no kubelet, no container runtime. Run via
+`playbooks/etcd_cluster.yml` against the `etcd_hosts` inventory group.
+
+**This is a deliberately separate role from
+`server_roles/kubernetes_node`'s own `k8s_external_etcd_enabled`
+option**, not an alternative implementation of the same thing:
+
+| | `kubernetes_node`'s external etcd | `etcd_cluster` |
+|---|---|---|
+| Mechanism | `kubeadm init phase certs`/`etcd local` | Plain `etcd`/`etcdctl` binaries |
+| Runs on | `k8s_etcd` inventory group | `etcd_hosts` inventory group |
+| Needs kubelet/a container runtime | Yes (etcd runs as a kubelet-managed static pod) | No |
+| Purpose-built for | A Kubernetes control plane to consume | Anything else — a generic distributed KV store/coordination service, evaluating etcd itself |
+| Client cert shape | One `apiserver-etcd-client` cert, meant for `kube-apiserver` | Whatever you generate against the cluster CA — no Kubernetes-specific cert exists here at all |
+
+They share no code and their certs/data are not interchangeable — don't
+point a Kubernetes cluster at an `etcd_cluster`-created cluster (or vice
+versa) expecting it to just work. If your only reason for wanting
+external etcd is Kubernetes, use `kubernetes_node`'s own option instead
+— this role is for every other reason.
+
+### Things that are NOT obvious and will bite you if skipped
+
+- **No package manager involved at all.** etcd has no consistent
+  official RPM across RHEL/AlmaLinux versions, so `tasks/install.yml`
+  downloads the upstream release tarball directly and verifies it
+  against `etcd_release_sha256` (from etcd's own published
+  `SHA256SUMS`) before extracting anything — this role refuses to
+  install an unverified binary, and `tasks/main.yml` fails loudly up
+  front if that checksum is empty.
+- **Mutual TLS needs a real (if small) CA, not a bare self-signed leaf
+  cert** — unlike `postgresql_server`/`mssql_server`/`apps/nginx`'s TLS
+  pattern (one self-signed cert per host, used by external clients
+  only), etcd needs every member to verify every *other* member's cert
+  too (peer TLS), which requires a shared CA all of them trust.
+  `tasks/tls.yml` generates a small self-signed CA once (the first
+  `etcd_hosts` host) and distributes it via the control node — same
+  "fetch to the control node, then copy out, never directly between
+  managed hosts" model as `provisioning/certificate_enrollment` and
+  `kubernetes_node`'s own external-etcd CA distribution — then each
+  host signs its own server/peer cert from that CA. A real CA
+  (`etcd_ssl_ca_src`) is pluggable, but then you're on the hook for
+  each host's own cert too (`etcd_ssl_cert_src`/`_key_src`, set in that
+  host's own `host_vars`, since the SAN has to carry that host's
+  address) — `provisioning/certificate_enrollment` against an internal
+  Windows CA is one way to get one.
+- **Bootstrap only, same posture as `kubernetes_node`'s external-etcd
+  option.** `templates/etcd.yaml.j2` always renders
+  `initial-cluster-state: new` — this role initializes a FRESH cluster
+  with every member started together. Adding a member to an
+  already-running cluster, or replacing a failed one, is a manual
+  `etcdctl member add`/`remove` procedure this role does not automate.
+- **Auth is a second, optional layer, not a replacement for TLS.**
+  `etcd_auth_enabled` (off by default) adds etcd's own username/password
+  auth on top of the mutual-TLS requirement that's always on — useful
+  once multiple distinct applications share one cluster and need
+  different permission scopes, not needed just to keep the cluster
+  secure at the network level. `tasks/auth.yml`'s `etcdctl user add
+  root:<password>` non-interactive syntax is documented etcdctl
+  behavior but wasn't tested against every patch release you might pin
+  `etcd_version` to — verify against your installed `etcdctl` if it
+  fails outright.
+- **Firewalld access is zone-wide, not source-restricted**, same
+  documented gap as every other `server_roles/` group.
+
+### What's intentionally out of scope
+
+- **Cluster membership changes after initial bootstrap** (adding a
+  member, replacing a failed one) — see above.
+- **Snapshotting/backup automation** — `etcdutl snapshot save` exists
+  and is installed by this role, but nothing schedules or manages it;
+  bring your own, same "mechanism vs. solution" posture as
+  `postgresql_server`'s WAL archiving.
+- **Multi-datacenter/WAN-aware topologies, learner members, dynamic
+  reconfiguration tooling** — this role stands up one flat, same-DC
+  cluster from a static inventory group, nothing more.
+- **A Kubernetes control plane pointed at this cluster** — see the
+  comparison table above; use `kubernetes_node`'s own
+  `k8s_external_etcd_enabled` option for that instead.

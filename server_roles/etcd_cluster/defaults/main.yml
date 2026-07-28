@@ -1,0 +1,95 @@
+---
+# Turns a hardened RHEL9/RHEL10/AlmaLinux9/AlmaLinux10 host into a
+# member of a standalone etcd cluster — plain upstream etcd, no
+# Kubernetes tooling involved at all (no kubeadm, no kubelet, no
+# container runtime). If you actually want etcd AS Kubernetes' backing
+# store, server_roles/kubernetes_node's own k8s_external_etcd_enabled
+# option already covers that, using kubeadm's own bootstrapping
+# mechanism against the k8s_etcd inventory group. This role is
+# deliberately separate and shares no code with that one: this is for
+# every OTHER reason you might want a standalone, TLS-secured etcd
+# cluster (a generic distributed KV store/coordination service for
+# something you're building, evaluating etcd itself, etc.) — kubeadm's
+# mechanism is inherently Kubernetes-shaped and far heavier
+# (kubeadm+kubelet+a container runtime just to run etcd) than this role
+# needs to be. Runs against the `etcd_hosts` inventory group — a
+# different group from kubernetes_node's `k8s_etcd`, on purpose, so the
+# two are never accidentally conflated. See docs/SERVER_ROLES.md.
+
+# --- Version -----------------------------------------------------------------
+# Pinned to a specific upstream GitHub release — bump deliberately, same
+# "verify before floating a new tag" posture as this repo's other pinned
+# external content (Calico/Flannel/MetalLB manifests, NetBox/registry
+# image tags). No repo/package manager involved: etcd has no consistent
+# official RPM across RHEL/AlmaLinux versions, so this downloads and
+# checksum-verifies the upstream release tarball directly — the same
+# widely-documented way most standalone etcd deployments are installed.
+etcd_version: "3.5.17"
+etcd_release_url: "https://github.com/etcd-io/etcd/releases/download/v{{ etcd_version }}/etcd-v{{ etcd_version }}-linux-amd64.tar.gz"
+# SHA256 of the release tarball above — etcd-io publishes a SHA256SUMS
+# file alongside each release; verify and update this together with
+# etcd_version, never bump one without the other. Empty fails the
+# download task loudly rather than silently trusting an unverified binary.
+etcd_release_sha256: ""
+
+etcd_install_dir: /usr/local/bin
+etcd_user: etcd
+etcd_group: etcd
+etcd_uid: 979   # arbitrary system UID below UID_MIN — verify it doesn't collide with an existing account if you change it
+etcd_data_dir: /var/lib/etcd
+etcd_config_dir: /etc/etcd
+etcd_tls_dir: "{{ etcd_config_dir }}/tls"
+
+# Data directory sizing/placement (its own filesystem, sized for actual
+# retention needs) is a provisioning-time decision this role can't make
+# for you — same posture as server_roles/postgresql_server's equivalent note.
+
+# --- Cluster topology -----------------------------------------------------------
+# etcd's own defaults, rarely changed.
+etcd_client_port: 2379
+etcd_peer_port: 2380
+# An arbitrary string identifying this specific cluster bootstrap — must
+# be the SAME value on every host in etcd_hosts, and unique per cluster
+# you ever bootstrap (prevents a stale member from an old, rebuilt
+# cluster of the same name accidentally rejoining this one).
+etcd_cluster_token: "CHANGEME"
+
+# --- TLS -----------------------------------------------------------------------
+# Same self-signed-default/real-cert-pluggable pattern as every other
+# TLS-terminating role in this repo, with one difference: etcd needs
+# mutual TLS in BOTH directions (peer-to-peer AND client-to-server), so
+# a bare self-signed leaf cert per host isn't enough the way it is for
+# postgresql_server/mssql_server/apps/nginx — every member has to trust
+# every OTHER member's cert, which needs a shared CA. If
+# etcd_ssl_ca_src is empty, tasks/tls.yml generates a small self-signed
+# CA once (on the first etcd_hosts host) and distributes it — same
+# "fetch to the control node, then copy out, never directly between
+# managed hosts" model already used by
+# server_roles/kubernetes_node's own external-etcd CA distribution and
+# provisioning/certificate_enrollment. If you supply a real CA
+# (etcd_ssl_ca_src), you're also on the hook for this host's own
+# cert/key (etcd_ssl_cert_src/_key_src, set in THIS HOST's own
+# host_vars, not group_vars, since each cert's SAN has to carry that
+# host's own address) — provisioning/certificate_enrollment against an
+# internal Windows CA is one way to get one.
+etcd_ssl_ca_src: ""
+etcd_ssl_cert_src: ""
+etcd_ssl_key_src: ""
+etcd_ssl_self_signed_days: 825
+
+# --- Client authentication --------------------------------------------------------
+# Off by default — mutual TLS (every client must already present a cert
+# signed by the cluster CA) already gates network access at the
+# transport layer; etcd's own username/password auth is a separate,
+# additional layer on top, useful once multiple distinct applications
+# share one cluster and need different permission scopes. See
+# docs/SERVER_ROLES.md before turning this on — it changes how every
+# client connects (an auth token, not just a client cert).
+etcd_auth_enabled: false
+etcd_root_password: ""   # vaulted, no default — required if etcd_auth_enabled is true
+
+# --- Resource / retention tuning (conservative starting points — size these
+# against actual workload, this is not a performance tuning role) ----------------
+etcd_quota_backend_bytes: 2147483648   # 2GiB, etcd's own default
+etcd_auto_compaction_retention: "1h"
+etcd_snapshot_count: 100000

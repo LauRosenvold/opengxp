@@ -3,8 +3,10 @@
 # This is the IQ/OQ/PQ execution environment (see docs/VALIDATION.md) —
 # it must match production control policy exactly.
 #
-# Shared by both k8s_control_plane and k8s_workers. Role-specific vars
-# (firewalld_rules, anything that differs between the two) live in
+# Shared by k8s_control_plane, k8s_workers, AND k8s_etcd (the last one
+# only matters if k8s_external_etcd_enabled is turned on below — an
+# empty k8s_etcd group otherwise). Role-specific vars (firewalld_rules,
+# anything that differs between the groups) live in
 # group_vars/k8s_control_plane.yml / group_vars/k8s_workers.yml instead.
 
 # --- Undo the fleet-wide "no IP forwarding" baseline for these hosts only ----
@@ -49,3 +51,12 @@ k8s_version: "1.31"
 # more than one host — an external LB/VIP you provide, this repo does not
 # stand one up. See docs/SERVER_ROLES.md.
 k8s_control_plane_endpoint: ""   # CHANGEME, e.g. "k8s-api.gxp.example.internal:6443"
+
+# --- External (non-stacked) etcd -------------------------------------------------
+# Off by default — kubeadm's stacked etcd (co-located on
+# k8s_control_plane nodes) needs nothing here. Flip on once you've
+# populated the k8s_etcd group in hosts.yml with dedicated hosts (an odd
+# number, 3 or 5 for real quorum tolerance — a single host has zero
+# fault tolerance and isn't really "external etcd" so much as "etcd
+# somewhere else"). See docs/SERVER_ROLES.md before turning this on.
+# k8s_external_etcd_enabled: true

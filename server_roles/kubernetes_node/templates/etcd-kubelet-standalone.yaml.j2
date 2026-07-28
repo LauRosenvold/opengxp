@@ -1,0 +1,16 @@
+# {{ ansible_managed | default('Managed by Ansible — server_roles/kubernetes_node') }}
+# Minimal KubeletConfiguration for a standalone kubelet that only ever
+# runs the static pod(s) under staticPodPath — this host never joins a
+# cluster, so there is no /var/lib/kubelet/kubeconfig or API server to
+# authenticate against. cgroupDriver is set here (not via the
+# --cgroup-driver CLI flag, removed from kubelet in later Kubernetes
+# releases) to stay correct across this role's whole
+# k8s_supported_versions range — must match whichever container runtime
+# is selected (k8s_container_runtime), same "MUST match the kubelet's
+# cgroup driver" requirement as crio_cgroup_manager and containerd's own
+# SystemdCgroup setting elsewhere in this role.
+apiVersion: kubelet.config.k8s.io/v1beta1
+kind: KubeletConfiguration
+address: 127.0.0.1
+staticPodPath: /etc/kubernetes/manifests
+cgroupDriver: systemd

@@ -26,6 +26,17 @@ controlPlaneEndpoint: "{{ k8s_control_plane_endpoint if k8s_control_plane_endpoi
 networking:
   podSubnet: {{ k8s_pod_network_cidr }}
   serviceSubnet: {{ k8s_service_cidr }}
+{% if k8s_external_etcd_enabled %}
+etcd:
+  external:
+    endpoints:
+{% for host in groups['k8s_etcd'] %}
+      - "https://{{ hostvars[host].ansible_default_ipv4.address }}:{{ k8s_etcd_client_port }}"
+{% endfor %}
+    caFile: /etc/kubernetes/pki/etcd/ca.crt
+    certFile: /etc/kubernetes/pki/apiserver-etcd-client.crt
+    keyFile: /etc/kubernetes/pki/apiserver-etcd-client.key
+{% endif %}
 apiServer:
   extraArgs:
 {% for key, value in k8s_apiserver_extra_args.items() %}
@@ -84,6 +95,17 @@ controlPlaneEndpoint: "{{ k8s_control_plane_endpoint if k8s_control_plane_endpoi
 networking:
   podSubnet: {{ k8s_pod_network_cidr }}
   serviceSubnet: {{ k8s_service_cidr }}
+{% if k8s_external_etcd_enabled %}
+etcd:
+  external:
+    endpoints:
+{% for host in groups['k8s_etcd'] %}
+      - "https://{{ hostvars[host].ansible_default_ipv4.address }}:{{ k8s_etcd_client_port }}"
+{% endfor %}
+    caFile: /etc/kubernetes/pki/etcd/ca.crt
+    certFile: /etc/kubernetes/pki/apiserver-etcd-client.crt
+    keyFile: /etc/kubernetes/pki/apiserver-etcd-client.key
+{% endif %}
 apiServer:
   extraArgs:
 {% for key, value in k8s_apiserver_extra_args.items() %}

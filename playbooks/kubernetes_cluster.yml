@@ -3,13 +3,16 @@
 # docs/SERVER_ROLES.md. Assumes hosts have already been through
 # playbooks/site.yml (or at least bootstrap.yml + hardening.yml).
 #
-# Deliberately ONE play covering both k8s_control_plane and k8s_workers,
-# and deliberately no `serial:` — server_roles/kubernetes_node's task
-# order relies on Ansible's linear strategy synchronizing every host at
-# each task boundary (prep everywhere, then init the first control-plane
-# node, then join everyone else). See tasks/main.yml's header comment in
-# that role for why splitting this into several plays or adding `serial`
-# would risk breaking that ordering.
+# Deliberately ONE play covering k8s_control_plane, k8s_workers, AND
+# k8s_etcd (empty unless you've populated it and set
+# k8s_external_etcd_enabled: true — see group_vars/k8s_nodes.yml and
+# docs/SERVER_ROLES.md), and deliberately no `serial:` —
+# server_roles/kubernetes_node's task order relies on Ansible's linear
+# strategy synchronizing every host at each task boundary (prep
+# everywhere, then bootstrap external etcd if enabled, then init the
+# first control-plane node, then join everyone else). See tasks/main.yml's
+# header comment in that role for why splitting this into several plays
+# or adding `serial` would risk breaking that ordering.
 #
 # Usage:
 #   ansible-playbook playbooks/kubernetes_cluster.yml \
@@ -22,7 +25,7 @@
 # before production, same as everything else in this repo.)
 
 - name: Configure a vanilla Kubernetes cluster
-  hosts: k8s_control_plane:k8s_workers
+  hosts: k8s_control_plane:k8s_workers:k8s_etcd
   become: true
 
   roles:

@@ -1,0 +1,29 @@
+---
+- name: Render the etcd config file
+  ansible.builtin.template:
+    src: etcd.yaml.j2
+    dest: "{{ etcd_config_dir }}/etcd.yaml"
+    owner: "{{ etcd_user }}"
+    group: "{{ etcd_group }}"
+    mode: "0640"
+  notify: Restart etcd
+
+- name: Deploy the systemd unit
+  ansible.builtin.template:
+    src: etcd.service.j2
+    dest: /etc/systemd/system/etcd.service
+    owner: root
+    group: root
+    mode: "0644"
+  register: etcd_unit_file
+
+- name: Reload systemd if the unit file changed
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when: etcd_unit_file.changed
+
+- name: Ensure etcd is enabled and running
+  ansible.builtin.systemd:
+    name: etcd
+    state: started
+    enabled: true

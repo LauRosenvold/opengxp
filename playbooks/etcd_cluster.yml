@@ -1,0 +1,28 @@
+---
+# Workload-enablement playbook, not part of playbooks/site.yml — see
+# docs/SERVER_ROLES.md. Assumes hosts have already been through
+# playbooks/site.yml (or at least bootstrap.yml + hardening.yml).
+#
+# Deliberately no `serial:` — the first host in etcd_hosts generates the
+# cluster CA (if self-signed) before any other host can sign its own
+# cert from it, same "linear strategy synchronizes every host at each
+# task boundary" reasoning as server_roles/kubernetes_node.
+#
+# This is a completely separate cluster/role from
+# server_roles/kubernetes_node's own k8s_external_etcd_enabled option —
+# see server_roles/etcd_cluster/defaults/main.yml for why they're not
+# shared code, and don't point Kubernetes at a cluster this playbook
+# created (the certs are shaped differently — no apiserver-etcd-client
+# cert exists here at all).
+#
+# Usage:
+#   ansible-playbook playbooks/etcd_cluster.yml \
+#     -i inventories/staging/hosts.yml --check --diff
+
+- name: Configure a standalone etcd cluster
+  hosts: etcd_hosts
+  become: true
+
+  roles:
+    - role: etcd_cluster
+      tags: [etcd]

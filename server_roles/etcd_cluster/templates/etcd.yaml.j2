@@ -1,0 +1,34 @@
+# {{ ansible_managed | default('Managed by Ansible — server_roles/etcd_cluster') }}
+# Bootstrap only: initial-cluster-state below is always "new", every
+# member started together from this same rendered config. Adding a
+# member to an already-running cluster, or replacing a failed one, is a
+# manual `etcdctl member add`/`remove` procedure this role does not
+# automate — same documented-gap posture as
+# server_roles/kubernetes_node's own external-etcd bootstrap-only note.
+name: {{ inventory_hostname }}
+data-dir: {{ etcd_data_dir }}
+
+listen-peer-urls: https://{{ ansible_default_ipv4.address }}:{{ etcd_peer_port }}
+listen-client-urls: https://{{ ansible_default_ipv4.address }}:{{ etcd_client_port }},https://127.0.0.1:{{ etcd_client_port }}
+initial-advertise-peer-urls: https://{{ ansible_default_ipv4.address }}:{{ etcd_peer_port }}
+advertise-client-urls: https://{{ ansible_default_ipv4.address }}:{{ etcd_client_port }}
+
+initial-cluster: "{% for host in groups['etcd_hosts'] %}{{ host }}=https://{{ hostvars[host].ansible_default_ipv4.address }}:{{ etcd_peer_port }}{{ ',' if not loop.last else '' }}{% endfor %}"
+initial-cluster-token: "{{ etcd_cluster_token }}"
+initial-cluster-state: new
+
+quota-backend-bytes: {{ etcd_quota_backend_bytes }}
+auto-compaction-retention: "{{ etcd_auto_compaction_retention }}"
+snapshot-count: {{ etcd_snapshot_count }}
+
+client-transport-security:
+  cert-file: {{ etcd_tls_dir }}/server.crt
+  key-file: {{ etcd_tls_dir }}/server.key
+  trusted-ca-file: {{ etcd_tls_dir }}/ca.crt
+  client-cert-auth: true
+
+peer-transport-security:
+  cert-file: {{ etcd_tls_dir }}/server.crt
+  key-file: {{ etcd_tls_dir }}/server.key
+  trusted-ca-file: {{ etcd_tls_dir }}/ca.crt
+  peer-client-cert-auth: true

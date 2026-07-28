@@ -100,6 +100,7 @@ see [docs/PKI_DNS.md](docs/PKI_DNS.md)):
 | MetalLB | v0.14.8 | off by default, L2 mode only; same "not auto-matched to `k8s_version`" caveat |
 | PostgreSQL (PGDG) | 15+ (open-ended — no fixed ceiling, see `postgresql_min_supported_version`) | `postgresql_version` in `inventories/<env>/group_vars/dbservers.yml` (default `16`); see [docs/SERVER_ROLES.md](docs/SERVER_ROLES.md) for the one forward-compat risk (`postgresql_pgaudit_package`) |
 | Microsoft SQL Server | 2019, 2022 (`mssql_supported_versions`, enumerated — see [docs/SERVER_ROLES.md](docs/SERVER_ROLES.md) for why this can't go open-ended the way PostgreSQL does); **EL9 only**, RHEL10/AlmaLinux10 not yet Microsoft-certified | `mssql_version` in `inventories/<env>/group_vars/mssql_hosts.yml` (default `2022`) |
+| etcd (standalone, `server_roles/etcd_cluster`) | 3.5.17 | `etcd_version` in `inventories/<env>/group_vars/etcd_hosts.yml`; pinned to a specific upstream GitHub release, checksum-verified via `etcd_release_sha256` — not a distro package |
 | Docker CE | latest from the distro-appropriate `docker-ce` repo | not independently version-pinned — tracks whatever that repo currently ships |
 
 **Application container images** (`apps/`):
@@ -189,9 +190,12 @@ environment differs:
   container runtime (containerd or CRI-O, pluggable), CNI (Calico or
   Flannel, pluggable) and any HA control-plane load balancer are
   bring-your-own, MetalLB (bare-metal `LoadBalancer` Services) is
-  available but off by default and L2-mode-only, and version changes go
-  through an explicitly-gated, one-minor-at-a-time upgrade playbook,
-  never routine patching — see
+  available but off by default and L2-mode-only, etcd defaults to
+  kubeadm's stacked topology with an external (dedicated-host) etcd
+  cluster available as an opt-in (`k8s_external_etcd_enabled`, a new
+  `k8s_etcd` inventory group — bootstrap only, not ongoing membership
+  management), and version changes go through an explicitly-gated,
+  one-minor-at-a-time upgrade playbook, never routine patching — see
   [docs/SERVER_ROLES.md](docs/SERVER_ROLES.md)'s `kubernetes_node`
   section before using this on anything real.
 - **PostgreSQL means PGDG packages** (not the OS's AppStream module),
@@ -212,6 +216,20 @@ environment differs:
   off-by-default-backup-mechanism posture as `postgresql_server` — see
   [docs/SERVER_ROLES.md](docs/SERVER_ROLES.md)'s `mssql_server` section
   before using this on anything real.
+- **`server_roles/etcd_cluster` is a standalone etcd cluster with
+  no Kubernetes tooling at all** — plain upstream `etcd`/`etcdctl`
+  binaries (a pinned, checksum-verified GitHub release, since etcd has
+  no consistent official RPM across RHEL/AlmaLinux), its own systemd
+  unit, mutual TLS via a small self-signed cluster CA by default. Runs
+  against its own `etcd_hosts` inventory group, deliberately separate
+  and non-interoperable with `kubernetes_node`'s own
+  `k8s_external_etcd_enabled` option (which bootstraps etcd via kubeadm
+  specifically for a Kubernetes control plane, needs kubelet + a
+  container runtime, and generates Kubernetes-specific client certs) —
+  use this role instead only when Kubernetes isn't the reason you want
+  etcd. See [docs/SERVER_ROLES.md](docs/SERVER_ROLES.md)'s
+  `etcd_cluster` section, including its comparison table against the
+  `kubernetes_node` option.
 - **Application deployments (NetBox, a private registry, standalone
   nginx, ...) live in `apps/`, a third tier below `server_roles/`.** An
   application runs *on top of* a `server_roles/` platform (e.g.
@@ -290,6 +308,7 @@ playbooks/
   kubernetes_upgrade.yml       # explicitly-gated version upgrade, --tags upgrade required
   postgresql_server.yml        # workload enablement, NOT part of site.yml
   mssql_server.yml             # workload enablement, NOT part of site.yml
+  etcd_cluster.yml             # workload enablement, NOT part of site.yml — standalone etcd, no Kubernetes involved
   netbox.yml                   # application deployment, NOT part of site.yml — see APPS.md
   registry.yml                 # application deployment, NOT part of site.yml — see APPS.md
   nginx.yml                    # application deployment, NOT part of site.yml — see APPS.md
@@ -320,9 +339,10 @@ roles/
   user_access_gxp/               # local + AD/IdM-group sudo (SoD), break-glass accounts — see IDENTITY.md
 server_roles/                  # workload enablement — separate change-control weight, see SERVER_ROLES.md
   docker_host/                   # Docker CE, hardened daemon.json, audit/AIDE/firewall integration
-  kubernetes_node/                # vanilla kubeadm, multi-version, pluggable runtime (containerd/CRI-O) + CNI (Calico/Flannel) + MetalLB
+  kubernetes_node/                # vanilla kubeadm, multi-version, pluggable runtime (containerd/CRI-O) + CNI (Calico/Flannel) + MetalLB + optional external etcd
   postgresql_server/               # PGDG PostgreSQL, pgAudit, TLS, basic primary/replica streaming replication
   mssql_server/                     # Microsoft SQL Server (mssql-server RPM), SQL Server Audit, TLS, EL9 only — see SERVER_ROLES.md
+  etcd_cluster/                      # standalone etcd (pinned upstream binary release, no Kubernetes tooling), mutual TLS — see SERVER_ROLES.md
 apps/                           # application deployments on top of server_roles/ — separate again, see APPS.md
   netbox/                         # NetBox Docker Compose stack: nginx TLS proxy, external-DB-recommended, containerized Redis
   registry/                       # Private Docker/OCI registry: native TLS, mandatory htpasswd auth, immutable images by default
@@ -496,6 +516,17 @@ accept the defaults for):
 ```bash
 ansible-playbook playbooks/mssql_server.yml -i inventories/staging/hosts.yml \
   -e mssql_accept_eula=true --check --diff
+```
+
+Stand up a standalone etcd cluster — no Kubernetes involved (`etcd_hosts`
+group, not `k8s_nodes`' own `k8s_etcd`; read
+[docs/SERVER_ROLES.md](docs/SERVER_ROLES.md) first, especially the
+comparison table against `kubernetes_node`'s own external-etcd option —
+`etcd_release_sha256` and `etcd_cluster_token` both fail the run loudly
+until you supply them):
+
+```bash
+ansible-playbook playbooks/etcd_cluster.yml -i inventories/staging/hosts.yml --check --diff
 ```
 
 Deploy NetBox on top of an already-provisioned Docker host (`netbox_hosts`

@@ -7,7 +7,7 @@
 # spirit as server_roles/docker_host's DOCKER-USER caveat).
 firewalld_rules:
   - { port: "6443/tcp" }        # kube-apiserver
-  - { port: "2379-2380/tcp" }   # etcd client/peer — control-plane nodes only ever talk to each other on this
+  - { port: "2379-2380/tcp" }   # etcd client/peer — control-plane nodes only ever talk to each other on this (stacked etcd, the default). Inbound-unnecessary-but-harmless if k8s_external_etcd_enabled is true instead — see group_vars/k8s_etcd.yml
   - { port: "10250/tcp" }       # kubelet API
   - { port: "10257/tcp" }       # kube-controller-manager
   - { port: "10259/tcp" }       # kube-scheduler

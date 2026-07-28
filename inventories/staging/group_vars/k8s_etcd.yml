@@ -1,0 +1,6 @@
+---
+# Same zone-wide-open caveat as group_vars/k8s_control_plane.yml. Only
+# relevant when k8s_external_etcd_enabled is true.
+firewalld_rules:
+  - { port: "2379/tcp" }   # etcd client — control-plane API servers connect here
+  - { port: "2380/tcp" }   # etcd peer — etcd members talk to each other here

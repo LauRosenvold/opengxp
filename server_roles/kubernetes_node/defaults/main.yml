@@ -131,6 +131,27 @@ k8s_apiserver_bind_port: 6443
 
 k8s_upload_certs: true   # required for additional control-plane nodes to join automatically
 
+# --- External etcd (optional) ---------------------------------------------------
+# kubeadm defaults to "stacked" etcd — one etcd member co-located on
+# each control-plane node, managed as a static pod, no separate
+# inventory group involved. Setting this true switches to kubeadm's own
+# documented "external etcd" topology instead: a dedicated etcd cluster
+# on its own hosts (the k8s_etcd inventory group, a third child of
+# k8s_nodes alongside k8s_control_plane/k8s_workers — see
+# inventories/<env>/hosts.yml), fully decoupled from control-plane node
+# lifecycle. Worth it once you're running more than a handful of
+# control-plane nodes, or want to replace/upgrade control-plane nodes
+# without ever touching etcd membership. See docs/SERVER_ROLES.md
+# before turning this on — it changes this role's task order and adds a
+# new inventory group, and tasks/etcd_local.yml only bootstraps a FRESH
+# etcd cluster; adding/replacing a member later is a manual `etcdctl
+# member add`/`remove` procedure this role does not automate.
+k8s_external_etcd_enabled: false
+
+# etcd's own client/peer ports — kubeadm's own defaults, rarely changed.
+k8s_etcd_client_port: 2379
+k8s_etcd_peer_port: 2380
+
 # --- CNI -------------------------------------------------------------------------
 # kubeadm deliberately ships no CNI — pick one. Calico (NetworkPolicy
 # support, common enterprise choice) and Flannel (simpler, VXLAN overlay

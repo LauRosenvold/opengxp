@@ -1,0 +1,42 @@
+# {{ ansible_managed | default('Managed by Ansible — server_roles/kubernetes_node') }}
+# Minimal kubeadm config used ONLY on k8s_etcd hosts, to generate this
+# host's etcd certs and static pod manifest via `kubeadm init phase
+# certs ...` / `kubeadm init phase etcd local` — this host never runs
+# `kubeadm init`/`join` itself. Same v1beta3/v1beta4 branching as
+# templates/kubeadm-config.yaml.j2 (see that file's header comment and
+# defaults/main.yml's k8s_kubeadm_api_version) — the etcd.local schema
+# itself hasn't changed between the two API versions as far as this was
+# written, only the surrounding extraArgs shape has.
+apiVersion: kubeadm.k8s.io/{{ k8s_kubeadm_api_version }}
+kind: ClusterConfiguration
+etcd:
+  local:
+    serverCertSANs:
+      - "{{ ansible_default_ipv4.address }}"
+    peerCertSANs:
+      - "{{ ansible_default_ipv4.address }}"
+    extraArgs:
+{% if k8s_kubeadm_api_version == 'v1beta4' %}
+      - name: initial-cluster
+        value: "{% for host in groups['k8s_etcd'] %}{{ host }}=https://{{ hostvars[host].ansible_default_ipv4.address }}:{{ k8s_etcd_peer_port }}{{ ',' if not loop.last else '' }}{% endfor %}"
+      - name: initial-cluster-state
+        value: "new"
+      - name: name
+        value: "{{ inventory_hostname }}"
+      - name: listen-peer-urls
+        value: "https://{{ ansible_default_ipv4.address }}:{{ k8s_etcd_peer_port }}"
+      - name: listen-client-urls
+        value: "https://{{ ansible_default_ipv4.address }}:{{ k8s_etcd_client_port }},https://127.0.0.1:{{ k8s_etcd_client_port }}"
+      - name: advertise-client-urls
+        value: "https://{{ ansible_default_ipv4.address }}:{{ k8s_etcd_client_port }}"
+      - name: initial-advertise-peer-urls
+        value: "https://{{ ansible_default_ipv4.address }}:{{ k8s_etcd_peer_port }}"
+{% else %}
+      initial-cluster: "{% for host in groups['k8s_etcd'] %}{{ host }}=https://{{ hostvars[host].ansible_default_ipv4.address }}:{{ k8s_etcd_peer_port }}{{ ',' if not loop.last else '' }}{% endfor %}"
+      initial-cluster-state: "new"
+      name: "{{ inventory_hostname }}"
+      listen-peer-urls: "https://{{ ansible_default_ipv4.address }}:{{ k8s_etcd_peer_port }}"
+      listen-client-urls: "https://{{ ansible_default_ipv4.address }}:{{ k8s_etcd_client_port }},https://127.0.0.1:{{ k8s_etcd_client_port }}"
+      advertise-client-urls: "https://{{ ansible_default_ipv4.address }}:{{ k8s_etcd_client_port }}"
+      initial-advertise-peer-urls: "https://{{ ansible_default_ipv4.address }}:{{ k8s_etcd_peer_port }}"
+{% endif %}

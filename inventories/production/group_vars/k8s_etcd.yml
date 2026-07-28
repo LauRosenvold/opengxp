@@ -1,0 +1,8 @@
+---
+# etcd-specific ports for the k8s_etcd group — only relevant when
+# k8s_external_etcd_enabled is true (see group_vars/k8s_nodes.yml); an
+# empty k8s_etcd group means this file never applies to anything. Same
+# zone-wide-open caveat as group_vars/k8s_control_plane.yml.
+firewalld_rules:
+  - { port: "2379/tcp" }   # etcd client — control-plane API servers connect here
+  - { port: "2380/tcp" }   # etcd peer — etcd members talk to each other here

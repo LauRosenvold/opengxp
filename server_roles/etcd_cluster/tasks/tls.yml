@@ -1,0 +1,169 @@
+---
+- name: Ensure the TLS directory exists
+  ansible.builtin.file:
+    path: "{{ etcd_tls_dir }}"
+    state: directory
+    owner: "{{ etcd_user }}"
+    group: "{{ etcd_group }}"
+    mode: "0750"
+
+- name: Deploy a real CA cert and this host's own cert/key, if supplied
+  ansible.builtin.copy:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    owner: "{{ etcd_user }}"
+    group: "{{ etcd_group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - { src: "{{ etcd_ssl_ca_src }}", dest: "{{ etcd_tls_dir }}/ca.crt", mode: "0644" }
+    - { src: "{{ etcd_ssl_cert_src }}", dest: "{{ etcd_tls_dir }}/server.crt", mode: "0644" }
+    - { src: "{{ etcd_ssl_key_src }}", dest: "{{ etcd_tls_dir }}/server.key", mode: "0600" }
+  loop_control:
+    label: "{{ item.dest }}"
+  when:
+    - etcd_ssl_ca_src | length > 0
+    - etcd_ssl_cert_src | length > 0
+    - etcd_ssl_key_src | length > 0
+  notify: Restart etcd
+
+# --- Self-signed cluster CA: generated once, on the first etcd_hosts host, then
+# distributed to the rest via the control node ------------------------------------
+
+- name: Check whether the cluster CA already exists on this host
+  ansible.builtin.stat:
+    path: "{{ etcd_tls_dir }}/ca.crt"
+  register: etcd_ca_stat
+  when: etcd_ssl_ca_src | length == 0
+
+- name: Warn that a self-signed cluster CA is being generated
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: etcd_ssl_ca_src is empty on {{ inventory_hostname }} —
+      generating (or, on hosts other than the first, receiving) a
+      self-signed cluster CA. Fine for lab/staging, NOT approved for
+      anything holding real data. Point etcd_ssl_ca_src (cluster-wide)
+      and etcd_ssl_cert_src/_key_src (per-host, in that host's own
+      host_vars) at a real CA-issued CA/cert/key once you have one —
+      see docs/SERVER_ROLES.md.
+  when:
+    - etcd_ssl_ca_src | length == 0
+    - not etcd_ca_stat.stat.exists
+
+- name: Generate the self-signed cluster CA (first etcd host only)
+  ansible.builtin.command: >
+    openssl req -new -x509 -days {{ etcd_ssl_self_signed_days }}
+    -nodes -text
+    -out {{ etcd_tls_dir }}/ca.crt
+    -keyout {{ etcd_tls_dir }}/ca.key
+    -subj "/CN=etcd-cluster-ca"
+  when:
+    - etcd_ssl_ca_src | length == 0
+    - inventory_hostname == (groups['etcd_hosts'] | first)
+    - not etcd_ca_stat.stat.exists
+  changed_when: true
+
+- name: Ensure the local artifact directory exists
+  ansible.builtin.file:
+    path: "{{ playbook_dir }}/../artifacts/etcd_cluster_ca"
+    state: directory
+    mode: "0700"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  when: etcd_ssl_ca_src | length == 0
+
+- name: Fetch the self-signed CA from the first etcd host
+  ansible.builtin.fetch:
+    src: "{{ etcd_tls_dir }}/{{ item }}"
+    dest: "{{ playbook_dir }}/../artifacts/etcd_cluster_ca/{{ item }}"
+    flat: true
+  loop:
+    - ca.crt
+    - ca.key
+  when:
+    - etcd_ssl_ca_src | length == 0
+    - inventory_hostname == (groups['etcd_hosts'] | first)
+  # ca.key leaving this host is unavoidable — every member needs it
+  # locally to sign its own server/peer cert from the same CA. Same
+  # "fetch to the control node, then copy out — never directly between
+  # managed hosts" model used throughout this repo. artifacts/
+  # etcd_cluster_ca/ is control-node-local, already covered by
+  # .gitignore's blanket *.key rule.
+
+- name: Distribute the self-signed CA to every other etcd host
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../artifacts/etcd_cluster_ca/{{ item }}"
+    dest: "{{ etcd_tls_dir }}/{{ item }}"
+    owner: "{{ etcd_user }}"
+    group: "{{ etcd_group }}"
+    mode: "{{ '0644' if item == 'ca.crt' else '0600' }}"
+  loop:
+    - ca.crt
+    - ca.key
+  when:
+    - etcd_ssl_ca_src | length == 0
+    - inventory_hostname != (groups['etcd_hosts'] | first)
+    - not etcd_ca_stat.stat.exists
+
+# --- This host's own server/peer cert, signed by the cluster CA ------------------
+
+- name: Check whether this host's own cert already exists
+  ansible.builtin.stat:
+    path: "{{ etcd_tls_dir }}/server.crt"
+  register: etcd_server_cert_stat
+  when: etcd_ssl_cert_src | length == 0
+
+- name: Generate this host's private key and CSR
+  ansible.builtin.command: >
+    openssl req -new -newkey rsa:2048 -nodes
+    -keyout {{ etcd_tls_dir }}/server.key
+    -out {{ etcd_tls_dir }}/server.csr
+    -subj "/CN={{ inventory_hostname }}"
+    -addext "subjectAltName=DNS:{{ inventory_hostname }},IP:{{ ansible_default_ipv4.address }},IP:127.0.0.1"
+  when:
+    - etcd_ssl_cert_src | length == 0
+    - not etcd_server_cert_stat.stat.exists
+  changed_when: true
+  notify: Restart etcd
+
+- name: Write the SAN extension file for signing
+  ansible.builtin.copy:
+    content: "subjectAltName=DNS:{{ inventory_hostname }},IP:{{ ansible_default_ipv4.address }},IP:127.0.0.1\n"
+    dest: "{{ etcd_tls_dir }}/server.ext"
+    owner: "{{ etcd_user }}"
+    group: "{{ etcd_group }}"
+    mode: "0600"
+  when:
+    - etcd_ssl_cert_src | length == 0
+    - not etcd_server_cert_stat.stat.exists
+
+- name: Sign this host's cert with the cluster CA
+  ansible.builtin.command: >
+    openssl x509 -req -days {{ etcd_ssl_self_signed_days }}
+    -in {{ etcd_tls_dir }}/server.csr
+    -CA {{ etcd_tls_dir }}/ca.crt -CAkey {{ etcd_tls_dir }}/ca.key -CAcreateserial
+    -out {{ etcd_tls_dir }}/server.crt
+    -extfile {{ etcd_tls_dir }}/server.ext
+  when:
+    - etcd_ssl_cert_src | length == 0
+    - not etcd_server_cert_stat.stat.exists
+  changed_when: true
+  notify: Restart etcd
+  # Since etcd needs peer AND client mutual TLS, every member's own cert
+  # has to be signed by the SAME cluster CA all the others trust — a
+  # per-host self-signed leaf cert (this repo's usual TLS default
+  # elsewhere) wouldn't let members verify each other at all. This is
+  # why this role's TLS setup is a real (if small) CA rather than the
+  # single-self-signed-cert pattern postgresql_server/mssql_server/
+  # apps/nginx use.
+
+- name: Ensure correct ownership/permissions on the CA and this host's cert/key
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    owner: "{{ etcd_user }}"
+    group: "{{ etcd_group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - { path: "{{ etcd_tls_dir }}/ca.crt", mode: "0644" }
+    - { path: "{{ etcd_tls_dir }}/server.crt", mode: "0644" }
+    - { path: "{{ etcd_tls_dir }}/server.key", mode: "0600" }

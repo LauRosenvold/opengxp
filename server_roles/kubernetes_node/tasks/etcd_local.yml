@@ -1,0 +1,185 @@
+---
+# kubeadm's own documented mechanism for standing up a dedicated
+# "external" etcd cluster — see
+# https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/setup-ha-etcd-with-kubeadm/.
+# Every host in the k8s_etcd group runs a STANDALONE kubelet plus a
+# kubeadm-generated static pod manifest for etcd — none of them ever run
+# `kubeadm init`/`kubeadm join`, and none becomes a Kubernetes API
+# object (no Node registers for them). They are only members of the
+# etcd cluster the control plane's API servers are pointed at (see
+# defaults/main.yml's k8s_external_etcd_enabled comment,
+# tasks/external_etcd_certs.yml, and templates/kubeadm-config.yaml.j2's
+# etcd.external block).
+#
+# Bootstrap only: this file initializes a FRESH etcd cluster from
+# scratch (initial-cluster-state: new, every member started together).
+# Adding a member to an already-running external etcd cluster later —
+# or replacing a failed one — is a manual `etcdctl member add`
+# procedure this role does not automate, same "documented gap, not
+# silently attempted" posture as this role's other out-of-scope items
+# (HA control-plane load balancer, Always On-style orchestration
+# elsewhere in this repo). See docs/SERVER_ROLES.md.
+
+- name: Render this host's etcd kubeadm config
+  ansible.builtin.template:
+    src: etcd-kubeadm-config.yaml.j2
+    dest: /etc/kubernetes/etcd-config.yaml
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: Render the standalone kubelet config for this etcd host
+  ansible.builtin.template:
+    src: etcd-kubelet-standalone.yaml.j2
+    dest: /etc/kubernetes/etcd-kubelet-config.yaml
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Deploy the standalone-kubelet systemd drop-in
+  ansible.builtin.template:
+    src: etcd-kubelet-dropin.conf.j2
+    dest: /etc/systemd/system/kubelet.service.d/20-etcd-standalone.conf
+    owner: root
+    group: root
+    mode: "0644"
+  register: k8s_etcd_kubelet_dropin
+  # Overrides kubeadm's own kubelet unit entirely — this host never gets
+  # the /var/lib/kubelet/kubeconfig a real kubeadm join would create, so
+  # the packaged ExecStart (which expects one) would otherwise fail to
+  # start at all. Written from the official kubeadm external-etcd guide,
+  # not tested against every kubelet release in
+  # k8s_supported_versions — verify against your installed kubelet
+  # version if the service fails to come up.
+
+- name: Reload systemd and (re)start kubelet if the drop-in changed
+  ansible.builtin.systemd:
+    name: kubelet
+    daemon_reload: true
+    state: "{{ 'restarted' if k8s_etcd_kubelet_dropin.changed else 'started' }}"
+    enabled: true
+
+- name: Check whether this etcd host's static pod manifest already exists
+  ansible.builtin.stat:
+    path: /etc/kubernetes/manifests/etcd.yaml
+  register: k8s_etcd_manifest_stat
+
+- name: Check whether the etcd CA already exists on this host
+  ansible.builtin.stat:
+    path: /etc/kubernetes/pki/etcd/ca.crt
+  register: k8s_etcd_ca_stat
+
+# --- CA: generated once, on the first etcd host, then distributed via the control node ---
+
+- name: Generate the etcd CA (first etcd host only)
+  ansible.builtin.command: kubeadm init phase certs etcd-ca --config=/etc/kubernetes/etcd-config.yaml
+  when:
+    - inventory_hostname == (groups['k8s_etcd'] | first)
+    - not k8s_etcd_ca_stat.stat.exists
+  changed_when: true
+
+- name: Ensure the local artifact directory exists
+  ansible.builtin.file:
+    path: "{{ playbook_dir }}/../artifacts/k8s_etcd_ca"
+    state: directory
+    mode: "0700"
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+- name: Fetch the etcd CA from the first etcd host
+  ansible.builtin.fetch:
+    src: "/etc/kubernetes/pki/etcd/{{ item }}"
+    dest: "{{ playbook_dir }}/../artifacts/k8s_etcd_ca/{{ item }}"
+    flat: true
+  loop:
+    - ca.crt
+    - ca.key
+  when: inventory_hostname == (groups['k8s_etcd'] | first)
+  # ca.key leaving this host is unavoidable here — every etcd member
+  # needs it locally to sign its own server/peer certs, and this repo's
+  # model for cross-host distribution is always "fetch to the control
+  # node, then copy out" (never a direct host-to-host copy, since
+  # managed hosts aren't assumed to trust each other's SSH keys — only
+  # the control node's). artifacts/k8s_etcd_ca/ is control-node-local,
+  # already covered by .gitignore's blanket *.key rule.
+
+- name: Ensure /etc/kubernetes/pki/etcd exists on every other etcd host
+  ansible.builtin.file:
+    path: /etc/kubernetes/pki/etcd
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  when:
+    - inventory_hostname != (groups['k8s_etcd'] | first)
+    - not k8s_etcd_ca_stat.stat.exists
+
+- name: Distribute the etcd CA to every other etcd host
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../artifacts/k8s_etcd_ca/{{ item }}"
+    dest: "/etc/kubernetes/pki/etcd/{{ item }}"
+    owner: root
+    group: root
+    mode: "0600"
+  loop:
+    - ca.crt
+    - ca.key
+  when:
+    - inventory_hostname != (groups['k8s_etcd'] | first)
+    - not k8s_etcd_ca_stat.stat.exists
+
+# --- Per-host server/peer/healthcheck certs + the static pod manifest ------------
+
+- name: Generate this host's etcd server/peer/healthcheck-client certs
+  ansible.builtin.command: "kubeadm init phase certs {{ item }} --config=/etc/kubernetes/etcd-config.yaml"
+  loop:
+    - etcd-server
+    - etcd-peer
+    - etcd-healthcheck-client
+  when: not k8s_etcd_manifest_stat.stat.exists
+  changed_when: true
+
+- name: Generate the etcd static pod manifest
+  ansible.builtin.command: kubeadm init phase etcd local --config=/etc/kubernetes/etcd-config.yaml
+  when: not k8s_etcd_manifest_stat.stat.exists
+  changed_when: true
+
+# --- apiserver-etcd-client cert: generated once, distributed to every control-plane host ---
+
+- name: Check whether the apiserver-etcd-client cert already exists
+  ansible.builtin.stat:
+    path: /etc/kubernetes/pki/apiserver-etcd-client.crt
+  register: k8s_apiserver_etcd_client_stat
+  when: inventory_hostname == (groups['k8s_etcd'] | first)
+
+- name: Generate the apiserver-etcd-client cert (first etcd host only)
+  ansible.builtin.command: kubeadm init phase certs apiserver-etcd-client --config=/etc/kubernetes/etcd-config.yaml
+  when:
+    - inventory_hostname == (groups['k8s_etcd'] | first)
+    - not k8s_apiserver_etcd_client_stat.stat.exists
+  changed_when: true
+
+- name: Fetch the apiserver-etcd-client cert/key for control-plane distribution
+  ansible.builtin.fetch:
+    src: "/etc/kubernetes/pki/{{ item }}"
+    dest: "{{ playbook_dir }}/../artifacts/k8s_etcd_ca/{{ item }}"
+    flat: true
+  loop:
+    - apiserver-etcd-client.crt
+    - apiserver-etcd-client.key
+  when: inventory_hostname == (groups['k8s_etcd'] | first)
+  # ca.crt itself was already fetched above (CA distribution block) —
+  # tasks/external_etcd_certs.yml reuses that same artifact file for
+  # every control-plane host, it doesn't need a second copy of it here.
+
+- name: Report this host's etcd status
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }}: etcd static pod manifest deployed
+      (/etc/kubernetes/manifests/etcd.yaml) — the standalone kubelet on
+      this host should now be running it as a container. Verify with
+      `crictl ps` or `journalctl -u kubelet` on this host directly; this
+      role does not health-check the etcd cluster for you (no etcdctl
+      install/wiring here — bring your own if you want scripted health
+      checks, see docs/SERVER_ROLES.md).

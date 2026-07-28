@@ -1,13 +1,20 @@
 ---
 # Deliberately ONE flat task list applied to the whole
-# k8s_control_plane:k8s_workers play (see playbooks/kubernetes_cluster.yml)
-# rather than split across several plays. Ansible's linear strategy
-# synchronizes every host at each task boundary — so "prep every node"
-# fully finishes fleet-wide before "init the first control-plane node"
-# starts, which fully finishes before "join everyone else" starts, purely
-# from task ORDER plus the `when` guards inside each included file. Don't
-# add `serial:` to that play, and don't split this into multiple plays —
-# either would risk breaking that ordering guarantee.
+# k8s_control_plane:k8s_workers:k8s_etcd play (see
+# playbooks/kubernetes_cluster.yml) rather than split across several
+# plays. Ansible's linear strategy synchronizes every host at each task
+# boundary — so "prep every node" fully finishes fleet-wide before
+# "bootstrap external etcd, if enabled" starts, which fully finishes
+# before "init the first control-plane node" starts, which fully
+# finishes before "join everyone else" starts, purely from task ORDER
+# plus the `when` guards inside each included file. Don't add `serial:`
+# to that play, and don't split this into multiple plays — either would
+# risk breaking that ordering guarantee. k8s_etcd hosts run repo.yml/
+# containerd.yml or crio.yml/node_prep.yml like every other node (they
+# need kubelet+kubeadm+a container runtime too — etcd itself runs as a
+# static pod, a container, under a standalone kubelet), then
+# tasks/etcd_local.yml instead of any control-plane/worker-specific
+# file — see that file's own header comment.
 
 - name: Fail loudly if k8s_version is outside the range this role supports
   ansible.builtin.assert:
@@ -38,6 +45,20 @@
 - name: Common node preparation (swap, kernel modules, sysctl)
   ansible.builtin.include_tasks: node_prep.yml
   tags: [prep]
+
+- name: Bootstrap the external etcd cluster
+  ansible.builtin.include_tasks: etcd_local.yml
+  tags: [etcd]
+  when:
+    - k8s_external_etcd_enabled | bool
+    - "'k8s_etcd' in group_names"
+
+- name: Distribute external etcd certs to control-plane hosts
+  ansible.builtin.include_tasks: external_etcd_certs.yml
+  tags: [etcd]
+  when:
+    - k8s_external_etcd_enabled | bool
+    - "'k8s_control_plane' in group_names"
 
 - name: Initialize the first control-plane node / regenerate join tokens
   ansible.builtin.include_tasks: control_plane_init.yml

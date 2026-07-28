@@ -1,0 +1,53 @@
+---
+# Optional additional layer on top of mutual TLS — see
+# defaults/main.yml's etcd_auth_enabled comment. Auth state is
+# cluster-wide, not per-node, so this only ever runs against the first
+# etcd_hosts host, same "one host does the one-time thing" pattern this
+# repo uses elsewhere (server_roles/kubernetes_node's first-control-plane-node,
+# this role's own first-host CA generation in tasks/tls.yml).
+#
+# `etcdctl user add root:<password>` (colon-separated, non-interactive)
+# is documented etcdctl behavior, but not tested against every etcd
+# patch release you might pin etcd_version to — verify against your
+# installed etcdctl's `--help` if this fails outright, same posture as
+# every other "verify against your installed version" caveat in this repo.
+
+- name: Check whether auth is already enabled
+  ansible.builtin.command: >
+    {{ etcd_install_dir }}/etcdctl
+    --endpoints=https://127.0.0.1:{{ etcd_client_port }}
+    --cacert={{ etcd_tls_dir }}/ca.crt --cert={{ etcd_tls_dir }}/server.crt --key={{ etcd_tls_dir }}/server.key
+    member list
+  register: etcd_auth_check
+  become_user: "{{ etcd_user }}"
+  changed_when: false
+  failed_when: false
+  when: inventory_hostname == (groups['etcd_hosts'] | first)
+  # An unauthenticated call that still succeeds (rc 0) means auth isn't
+  # enabled yet — a non-zero rc here, once auth already IS enabled, is
+  # etcd correctly rejecting the request for lacking credentials, not a
+  # real failure.
+
+- name: Enable root authentication
+  when:
+    - inventory_hostname == (groups['etcd_hosts'] | first)
+    - etcd_auth_check.rc == 0
+  block:
+    - name: Create the root user
+      ansible.builtin.command: >
+        {{ etcd_install_dir }}/etcdctl
+        --endpoints=https://127.0.0.1:{{ etcd_client_port }}
+        --cacert={{ etcd_tls_dir }}/ca.crt --cert={{ etcd_tls_dir }}/server.crt --key={{ etcd_tls_dir }}/server.key
+        user add root:{{ etcd_root_password }}
+      become_user: "{{ etcd_user }}"
+      changed_when: true
+      no_log: true   # command line contains etcd_root_password
+
+    - name: Enable authentication
+      ansible.builtin.command: >
+        {{ etcd_install_dir }}/etcdctl
+        --endpoints=https://127.0.0.1:{{ etcd_client_port }}
+        --cacert={{ etcd_tls_dir }}/ca.crt --cert={{ etcd_tls_dir }}/server.crt --key={{ etcd_tls_dir }}/server.key
+        auth enable
+      become_user: "{{ etcd_user }}"
+      changed_when: true

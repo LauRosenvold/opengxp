@@ -1,0 +1,20 @@
+---
+galaxy_info:
+  role_name: etcd_cluster
+  description: >-
+    Standalone etcd cluster — plain upstream etcd (pinned, checksummed
+    GitHub release binary, no Kubernetes tooling involved at all: no
+    kubeadm, no kubelet, no container runtime), mutual TLS (peer and
+    client, self-signed cluster CA by default with a real-CA-pluggable
+    path), optional root auth on top. Distinct from
+    server_roles/kubernetes_node's k8s_external_etcd_enabled option,
+    which bootstraps etcd via kubeadm specifically for a Kubernetes
+    control plane to consume — this role shares no code with that one.
+    Runs against the `etcd_hosts` inventory group. Lives in
+    server_roles/, not roles/ — see docs/SERVER_ROLES.md.
+  license: Apache-2.0
+  min_ansible_version: "2.15"
+  platforms:
+    - name: EL
+      versions: ["9", "10"]
+dependencies: []
