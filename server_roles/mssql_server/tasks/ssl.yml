@@ -1,0 +1,73 @@
+---
+- name: Ensure the TLS directory exists
+  ansible.builtin.file:
+    path: /var/opt/mssql/tls
+    state: directory
+    owner: mssql
+    group: mssql
+    mode: "0750"
+  when: mssql_tls_enabled | bool
+
+- name: Deploy a real TLS certificate and key, if supplied
+  ansible.builtin.copy:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    owner: mssql
+    group: mssql
+    mode: "{{ item.mode }}"
+  loop:
+    - { src: "{{ mssql_ssl_cert_src }}", dest: /var/opt/mssql/tls/server.crt, mode: "0644" }
+    - { src: "{{ mssql_ssl_key_src }}", dest: /var/opt/mssql/tls/server.key, mode: "0600" }
+  loop_control:
+    label: "{{ item.dest }}"
+  when:
+    - mssql_tls_enabled | bool
+    - mssql_ssl_cert_src | length > 0
+    - mssql_ssl_key_src | length > 0
+  notify: Restart mssql-server
+
+- name: Check whether a self-signed certificate already exists
+  ansible.builtin.stat:
+    path: /var/opt/mssql/tls/server.crt
+  register: mssql_selfsigned_cert_stat
+  when:
+    - mssql_tls_enabled | bool
+    - mssql_ssl_cert_src | length == 0
+
+- name: Warn that a self-signed certificate is being generated
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: mssql_ssl_cert_src/key_src are empty on
+      {{ inventory_hostname }} — generating a self-signed certificate.
+      Fine for lab/staging, NOT approved for a real GxP production
+      database. Point those vars at a real CA-issued cert/key once you
+      have one — see docs/SERVER_ROLES.md.
+  when:
+    - mssql_tls_enabled | bool
+    - mssql_ssl_cert_src | length == 0
+    - not mssql_selfsigned_cert_stat.stat.exists
+
+- name: Generate a self-signed certificate and key
+  ansible.builtin.command: >
+    openssl req -new -x509 -days {{ mssql_ssl_self_signed_days }}
+    -nodes -text
+    -out /var/opt/mssql/tls/server.crt
+    -keyout /var/opt/mssql/tls/server.key
+    -subj "/CN={{ ansible_fqdn | default(inventory_hostname) }}"
+  when:
+    - mssql_tls_enabled | bool
+    - mssql_ssl_cert_src | length == 0
+    - not mssql_selfsigned_cert_stat.stat.exists
+  changed_when: true
+  notify: Restart mssql-server
+
+- name: Ensure correct ownership/permissions on the certificate and key
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    owner: mssql
+    group: mssql
+    mode: "{{ item.mode }}"
+  loop:
+    - { path: /var/opt/mssql/tls/server.crt, mode: "0644" }
+    - { path: /var/opt/mssql/tls/server.key, mode: "0600" }
+  when: mssql_tls_enabled | bool

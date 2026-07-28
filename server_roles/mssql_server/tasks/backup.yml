@@ -1,0 +1,85 @@
+---
+- name: Ensure the backup directory exists
+  ansible.builtin.file:
+    path: "{{ mssql_backup_dir }}"
+    state: directory
+    owner: mssql
+    group: mssql
+    mode: "0750"
+  when: mssql_backup_enabled | bool
+
+- name: Render the backup T-SQL script
+  ansible.builtin.template:
+    src: mssql_backup.sql.j2
+    dest: /var/opt/mssql/backup.sql
+    owner: mssql
+    group: mssql
+    mode: "0640"
+  when: mssql_backup_enabled | bool
+
+- name: Store the sa credential the scheduled backup reads (root-only)
+  ansible.builtin.copy:
+    content: "{{ mssql_sa_password }}"
+    dest: /var/opt/mssql/.backup_credential
+    owner: root
+    group: root
+    mode: "0600"
+  when: mssql_backup_enabled | bool
+  no_log: true
+  # Plaintext on disk, root-only — same "host-level controls
+  # (roles/user_access_gxp, roles/auditd_gxp) are what actually gate
+  # this, not file mode alone" trade-off apps/netbox's TLS key comment
+  # already accepts. A dedicated, minimally-privileged backup login
+  # instead of sa is a documented gap — see docs/SERVER_ROLES.md.
+
+- name: Deploy the backup wrapper script
+  ansible.builtin.template:
+    src: mssql_backup_wrapper.sh.j2
+    dest: /usr/local/sbin/mssql-backup.sh
+    owner: root
+    group: root
+    mode: "0700"
+  when: mssql_backup_enabled | bool
+
+- name: Schedule periodic backups
+  ansible.builtin.template:
+    src: mssql_backup_cron.j2
+    dest: /etc/cron.d/mssql-backup
+    owner: root
+    group: root
+    mode: "0644"
+  when: mssql_backup_enabled | bool
+
+- name: Remove backup artifacts if disabled
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /usr/local/sbin/mssql-backup.sh
+    - /etc/cron.d/mssql-backup
+    - /var/opt/mssql/.backup_credential
+    - /var/opt/mssql/backup.sql
+  when: not (mssql_backup_enabled | bool)
+
+- name: Warn that this is a mechanism, not a backup solution
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: mssql_backup_enabled is true on {{ inventory_hostname }},
+      writing full native backups to a local directory
+      ({{ mssql_backup_dir }}) via the sa account. This is NOT an
+      offsite backup, has no retention policy beyond whatever cleans
+      {{ mssql_backup_dir }}, and gives you no restore drill. Point this
+      at real backup infrastructure (or Ola Hallengren's maintenance
+      solution, this ecosystem's de facto standard) before relying on it
+      for anything real. See docs/SERVER_ROLES.md.
+  when: mssql_backup_enabled | bool
+
+- name: Warn that backup is off (no mechanism at all)
+  ansible.builtin.debug:
+    msg: >-
+      NOTE: mssql_backup_enabled is false for {{ inventory_hostname }} —
+      no backup mechanism at all beyond whatever you do completely
+      outside this role. This is an open item for your validation
+      package if this database holds GxP records — see
+      docs/VALIDATION.md.
+  when: not (mssql_backup_enabled | bool)

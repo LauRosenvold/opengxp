@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# {{ ansible_managed | default('Managed by Ansible — server_roles/mssql_server') }}
+set -euo pipefail
+
+logger -t mssql-backup "Starting backup run"
+{{ mssql_sqlcmd_bin }} -S localhost -U sa -P "$(cat /var/opt/mssql/.backup_credential)" -C \
+  -i /var/opt/mssql/backup.sql \
+  >> /var/log/mssql-backup.log 2>&1
+logger -t mssql-backup "Backup run complete"

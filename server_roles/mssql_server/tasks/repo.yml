@@ -1,0 +1,73 @@
+---
+- name: Determine whether we're falling back to the public Microsoft repos
+  ansible.builtin.set_fact:
+    mssql_using_public_repo: "{{ mssql_repo_baseurl == 'CHANGEME' }}"
+    mssql_tools_using_public_repo: "{{ mssql_tools_repo_baseurl == 'CHANGEME' }}"
+
+- name: Warn when bypassing Satellite for SQL Server content
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: {{ inventory_hostname }} is using
+      packages.microsoft.com directly instead of a Satellite-managed
+      content view for SQL Server {{ mssql_version }}. Fine for
+      lab/evaluation — see docs/SERVER_ROLES.md.
+  when: mssql_using_public_repo
+
+- name: Configure Satellite-hosted mssql-server repo
+  ansible.builtin.yum_repository:
+    name: "mssql-server-{{ mssql_version }}-satellite"
+    description: "SQL Server {{ mssql_version }} (Satellite-managed content view)"
+    baseurl: "{{ mssql_repo_baseurl }}"
+    gpgkey: "{{ mssql_repo_gpgkey }}"
+    gpgcheck: true
+    enabled: true
+  when: not mssql_using_public_repo
+
+- name: Install the public mssql-server repo definition (fallback only)
+  ansible.builtin.get_url:
+    url: "{{ mssql_public_repo_url }}"
+    dest: /etc/yum.repos.d/mssql-server.repo
+    mode: "0644"
+    force: true
+  when: mssql_using_public_repo
+
+- name: Configure Satellite-hosted mssql-tools repo
+  ansible.builtin.yum_repository:
+    name: "mssql-tools-satellite"
+    description: "SQL Server command-line tools (Satellite-managed content view)"
+    baseurl: "{{ mssql_tools_repo_baseurl }}"
+    gpgkey: "{{ mssql_tools_repo_gpgkey }}"
+    gpgcheck: true
+    enabled: true
+  when: not mssql_tools_using_public_repo
+
+- name: Install the public mssql-tools repo definition (fallback only)
+  ansible.builtin.get_url:
+    url: "{{ mssql_tools_public_repo_url }}"
+    dest: /etc/yum.repos.d/microsoft-prod.repo
+    mode: "0644"
+    force: true
+  when: mssql_tools_using_public_repo
+  # Microsoft ships mssql-tools18 in the same general "prod" repo used
+  # for several of their Linux products, not a tools-specific one the
+  # way mssql-server gets its own per-version repo file — verify this is
+  # still the correct URL against Microsoft's current sqlcmd install
+  # docs, product repo layouts have moved before.
+
+- name: Install SQL Server
+  ansible.builtin.dnf:
+    name: mssql-server
+    state: present
+
+- name: Install SQL Server command-line tools (sqlcmd) and the ODBC driver
+  ansible.builtin.dnf:
+    name:
+      - mssql-tools18
+      - unixODBC-devel
+    state: present
+  environment:
+    ACCEPT_EULA: "Y"
+  # msodbcsql18 (the actual ODBC driver) comes in as mssql-tools18's own
+  # dependency and carries a SEPARATE Microsoft EULA acceptance
+  # requirement at install time — same ACCEPT_EULA=Y environment
+  # variable convention as mssql-server's own setup step (tasks/setup.yml).

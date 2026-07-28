@@ -1,0 +1,40 @@
+---
+# Server Audit + Server Audit Specification — the T-SQL equivalent of
+# server_roles/postgresql_server's pgAudit. Needs a running instance,
+# same reasoning as that role's tasks/pgaudit.yml running after
+# tasks/config.yml starts the service.
+
+- name: Ensure the audit file directory exists
+  ansible.builtin.file:
+    path: "{{ mssql_audit_dir }}"
+    state: directory
+    owner: mssql
+    group: mssql
+    mode: "0750"
+
+- name: Check whether the server audit is already created and enabled
+  ansible.builtin.command: >
+    {{ mssql_sqlcmd_bin }} -S localhost -U sa -P "{{ mssql_sa_password }}" -C -h -1 -W -Q
+    "SET NOCOUNT ON; SELECT CASE WHEN EXISTS (SELECT 1 FROM sys.server_audits sa JOIN sys.server_audit_specifications sas ON 1=1 WHERE sa.name = N'{{ mssql_audit_name }}' AND sa.is_state_enabled = 1 AND sas.name = N'{{ mssql_audit_name }}_spec' AND sas.is_state_enabled = 1) THEN 1 ELSE 0 END"
+  become_user: mssql
+  register: mssql_audit_check
+  changed_when: false
+  no_log: true   # command line contains the sa password
+
+- name: Deploy and run the audit setup script
+  when: mssql_audit_check.stdout | default('') | trim != '1'
+  block:
+    - name: Render the audit setup script
+      ansible.builtin.template:
+        src: audit_setup.sql.j2
+        dest: /var/opt/mssql/audit_setup.sql
+        owner: mssql
+        group: mssql
+        mode: "0600"
+
+    - name: Run the audit setup script
+      ansible.builtin.command: >
+        {{ mssql_sqlcmd_bin }} -S localhost -U sa -P "{{ mssql_sa_password }}" -C -i /var/opt/mssql/audit_setup.sql
+      become_user: mssql
+      changed_when: true
+      no_log: true   # command line contains the sa password

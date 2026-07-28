@@ -1,0 +1,41 @@
+-- {{ ansible_managed | default('Managed by Ansible — server_roles/mssql_server') }}
+-- Idempotent by design (IF NOT EXISTS / IF ... = 0 guards) — safe to
+-- re-run, though tasks/audit.yml only actually invokes this when its own
+-- pre-check found the audit missing or disabled.
+
+IF NOT EXISTS (SELECT 1 FROM sys.server_audits WHERE name = N'{{ mssql_audit_name }}')
+BEGIN
+    CREATE SERVER AUDIT [{{ mssql_audit_name }}]
+    TO FILE
+    (
+        FILEPATH = N'{{ mssql_audit_dir }}',
+        MAXSIZE = {{ mssql_audit_max_file_size_mb }} MB,
+        MAX_FILES = {{ mssql_audit_max_files }},
+        RESERVE_DISK_SPACE = OFF
+    )
+    WITH
+    (
+        QUEUE_DELAY = 1000,
+        ON_FAILURE = CONTINUE
+    );
+END;
+
+IF NOT EXISTS (SELECT 1 FROM sys.server_audit_specifications WHERE name = N'{{ mssql_audit_name }}_spec')
+BEGIN
+    CREATE SERVER AUDIT SPECIFICATION [{{ mssql_audit_name }}_spec]
+    FOR SERVER AUDIT [{{ mssql_audit_name }}]
+{% for group in mssql_audit_action_groups %}
+    ADD ({{ group }}){{ "," if not loop.last else "" }}
+{% endfor %}
+    WITH (STATE = ON);
+END;
+
+IF EXISTS (SELECT 1 FROM sys.server_audits WHERE name = N'{{ mssql_audit_name }}' AND is_state_enabled = 0)
+BEGIN
+    ALTER SERVER AUDIT [{{ mssql_audit_name }}] WITH (STATE = ON);
+END;
+
+IF EXISTS (SELECT 1 FROM sys.server_audit_specifications WHERE name = N'{{ mssql_audit_name }}_spec' AND is_state_enabled = 0)
+BEGIN
+    ALTER SERVER AUDIT SPECIFICATION [{{ mssql_audit_name }}_spec] WITH (STATE = ON);
+END;

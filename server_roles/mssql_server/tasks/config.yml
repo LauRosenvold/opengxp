@@ -1,0 +1,48 @@
+---
+- name: Build the list of mssql-conf settings to enforce
+  ansible.builtin.set_fact:
+    mssql_conf_settings: >-
+      {{
+        [
+          {'key': 'network.tcpport', 'value': mssql_port | string},
+          {'key': 'memory.memorylimitmb', 'value': mssql_memory_limit_mb | string},
+          {'key': 'network.forceencryption', 'value': ('1' if mssql_force_encryption else '0')}
+        ]
+        + ([
+          {'key': 'network.tlscert', 'value': '/var/opt/mssql/tls/server.crt'},
+          {'key': 'network.tlskey', 'value': '/var/opt/mssql/tls/server.key'},
+          {'key': 'network.tlsprotocols', 'value': '1.2'}
+        ] if mssql_tls_enabled else [])
+      }}
+
+- name: Get current mssql-conf setting for each key
+  ansible.builtin.command: "/opt/mssql/bin/mssql-conf get {{ item.key }}"
+  register: mssql_conf_current
+  changed_when: false
+  failed_when: false
+  loop: "{{ mssql_conf_settings }}"
+  loop_control:
+    label: "{{ item.key }}"
+
+- name: Apply any mssql-conf setting that doesn't already match
+  ansible.builtin.command: "/opt/mssql/bin/mssql-conf set {{ item.item.key }} {{ item.item.value }}"
+  loop: "{{ mssql_conf_current.results }}"
+  loop_control:
+    label: "{{ item.item.key }}"
+  when: item.item.value not in (item.stdout | default(''))
+  changed_when: true
+  notify: Restart mssql-server
+  # `mssql-conf get`'s output ("Config value ... currently set to
+  # '<value>'"-style prose, not guaranteed to be exactly the bare value)
+  # isn't documented as a stable machine-readable contract the way e.g.
+  # firewall-cmd --get-log-denied's bare output is — this substring
+  # check is a best-effort idempotency signal, not a guarantee. Verify
+  # against your installed mssql-conf version if a setting here seems to
+  # re-apply every run when it shouldn't.
+
+- name: Ensure mssql-server is enabled and running
+  ansible.builtin.systemd:
+    name: "{{ mssql_service_name }}"
+    state: started
+    enabled: true
+    daemon_reload: true

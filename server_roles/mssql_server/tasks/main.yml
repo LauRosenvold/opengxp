@@ -1,0 +1,51 @@
+---
+# Order matters, same principle as server_roles/postgresql_server's
+# tasks/main.yml: packages/repo before initial setup, initial setup
+# (data directory created) before mssql-conf hardening, service running
+# before any sqlcmd-based task (audit, backup).
+
+- name: Fail loudly if this host's EL major version isn't Microsoft-supported
+  ansible.builtin.assert:
+    that:
+      - ansible_distribution_major_version in mssql_supported_el_major_versions
+    fail_msg: >-
+      {{ ansible_distribution }} {{ ansible_distribution_major_version }}
+      is not in mssql_supported_el_major_versions
+      ({{ mssql_supported_el_major_versions | join(', ') }}) — Microsoft
+      only officially certifies specific RHEL major versions for
+      mssql-server, see defaults/main.yml.
+
+- name: Fail loudly if mssql_version isn't one this role supports
+  ansible.builtin.assert:
+    that:
+      - mssql_version in mssql_supported_versions
+    fail_msg: >-
+      mssql_version is "{{ mssql_version }}", not in
+      mssql_supported_versions
+      ({{ mssql_supported_versions | join(', ') }}) — see
+      defaults/main.yml.
+
+- name: Install SQL Server and command-line tools
+  ansible.builtin.include_tasks: repo.yml
+  tags: [prep]
+
+- name: Configure TLS
+  ansible.builtin.include_tasks: ssl.yml
+  tags: [prep]
+
+- name: Run initial setup (EULA, sa password, edition, collation)
+  ansible.builtin.include_tasks: setup.yml
+  tags: [prep]
+
+- name: Apply mssql-conf settings and start the service
+  ansible.builtin.include_tasks: config.yml
+  tags: [config]
+
+- name: Configure SQL Server Audit
+  ansible.builtin.include_tasks: audit.yml
+  tags: [audit]
+  when: mssql_audit_enabled | bool
+
+- name: Configure scheduled backups
+  ansible.builtin.include_tasks: backup.yml
+  tags: [backup]

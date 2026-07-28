@@ -1,0 +1,63 @@
+---
+# One-time initial setup (EULA acceptance, sa password, edition/PID,
+# collation) — only for a host with no existing SQL Server instance.
+# Changing MSSQL_PID/collation after this point needs Microsoft's own
+# documented re-run/rebuild procedure, not something this role
+# automates (same "initial-setup-only" posture as
+# server_roles/postgresql_server's tasks/initdb.yml).
+
+- name: Fail loudly unless the Microsoft EULA was explicitly accepted
+  ansible.builtin.assert:
+    that:
+      - mssql_accept_eula | bool
+    fail_msg: >-
+      mssql_accept_eula is false. This role will not accept Microsoft's
+      SQL Server EULA on your behalf — read it
+      (https://go.microsoft.com/fwlink/?LinkId=746388), then set
+      mssql_accept_eula: true deliberately once you have.
+
+- name: Fail loudly if no sa password was supplied
+  ansible.builtin.assert:
+    that:
+      - mssql_sa_password | length > 0
+    fail_msg: >-
+      mssql_sa_password is empty. Supply it via an ansible-vault
+      encrypted group_vars/host_vars file — do not put it here in
+      plaintext. SQL Server also enforces its own password complexity
+      policy (8+ characters, 3 of 4 character classes) — mssql-conf
+      setup itself fails loudly below if this doesn't meet it.
+
+- name: Warn if running a non-production-licensed edition
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: mssql_pid is "{{ mssql_pid }}" on
+      {{ inventory_hostname }} — Developer and Express editions are
+      licensed for non-production use only (Microsoft's EULA terms, not
+      this repo's). Set mssql_pid to "Standard", "Enterprise",
+      "EnterpriseCore", or a real product key before this holds anything
+      real.
+  when: mssql_pid in ['Developer', 'Express']
+
+- name: Check whether this instance is already set up
+  ansible.builtin.stat:
+    path: "{{ mssql_data_dir }}/master.mdf"
+  register: mssql_master_db_stat
+
+- name: Run non-interactive initial setup
+  ansible.builtin.command: /opt/mssql/bin/mssql-conf -n setup
+  environment:
+    ACCEPT_EULA: "Y"
+    MSSQL_PID: "{{ mssql_pid }}"
+    MSSQL_SA_PASSWORD: "{{ mssql_sa_password }}"
+    MSSQL_COLLATION: "{{ mssql_collation }}"
+  when: not mssql_master_db_stat.stat.exists
+  changed_when: true
+  no_log: true   # environment includes MSSQL_SA_PASSWORD
+  # `mssql-conf -n setup` reading MSSQL_*/ACCEPT_EULA from the
+  # environment for a fully non-interactive run is Microsoft's
+  # documented automation path, but exact flag/env-var support has
+  # shifted between mssql-conf releases before — verify against your
+  # installed version's `mssql-conf --help` if this fails outright
+  # rather than with a clear complexity/EULA error, same posture as
+  # every other "verify against your installed version" caveat in this
+  # repo (e.g. provisioning/dns_registration's win_dns_record note).

@@ -99,6 +99,7 @@ see [docs/PKI_DNS.md](docs/PKI_DNS.md)):
 | Flannel (CNI) | v0.25.5 | same caveat as Calico above |
 | MetalLB | v0.14.8 | off by default, L2 mode only; same "not auto-matched to `k8s_version`" caveat |
 | PostgreSQL (PGDG) | 15+ (open-ended — no fixed ceiling, see `postgresql_min_supported_version`) | `postgresql_version` in `inventories/<env>/group_vars/dbservers.yml` (default `16`); see [docs/SERVER_ROLES.md](docs/SERVER_ROLES.md) for the one forward-compat risk (`postgresql_pgaudit_package`) |
+| Microsoft SQL Server | 2019, 2022 (`mssql_supported_versions`, enumerated — see [docs/SERVER_ROLES.md](docs/SERVER_ROLES.md) for why this can't go open-ended the way PostgreSQL does); **EL9 only**, RHEL10/AlmaLinux10 not yet Microsoft-certified | `mssql_version` in `inventories/<env>/group_vars/mssql_hosts.yml` (default `2022`) |
 | Docker CE | latest from the distro-appropriate `docker-ce` repo | not independently version-pinned — tracks whatever that repo currently ships |
 
 **Application container images** (`apps/`):
@@ -199,6 +200,18 @@ environment differs:
   failover, and WAL archiving is a mechanism, not a backup strategy — see
   [docs/SERVER_ROLES.md](docs/SERVER_ROLES.md)'s `postgresql_server`
   section before using this on anything real.
+- **Microsoft SQL Server (`server_roles/mssql_server`) is a separate
+  database-engine role and inventory group (`mssql_hosts`), not folded
+  into `dbservers`/`postgresql_server`.** EL9 only — Microsoft doesn't
+  certify RHEL 10 for `mssql-server` yet, and this role fails loudly
+  rather than assuming it works. This role will not accept Microsoft's
+  EULA for you (`mssql_accept_eula` must be set `true` deliberately),
+  defaults to the Developer edition (non-production-licensed, warns
+  loudly every run), and SQL Server Audit (the T-SQL equivalent of
+  pgAudit) and native backup follow the same on-by-default-audit/
+  off-by-default-backup-mechanism posture as `postgresql_server` — see
+  [docs/SERVER_ROLES.md](docs/SERVER_ROLES.md)'s `mssql_server` section
+  before using this on anything real.
 - **Application deployments (NetBox, a private registry, standalone
   nginx, ...) live in `apps/`, a third tier below `server_roles/`.** An
   application runs *on top of* a `server_roles/` platform (e.g.
@@ -276,6 +289,7 @@ playbooks/
   kubernetes_cluster.yml       # vanilla kubeadm cluster setup, NOT part of site.yml
   kubernetes_upgrade.yml       # explicitly-gated version upgrade, --tags upgrade required
   postgresql_server.yml        # workload enablement, NOT part of site.yml
+  mssql_server.yml             # workload enablement, NOT part of site.yml
   netbox.yml                   # application deployment, NOT part of site.yml — see APPS.md
   registry.yml                 # application deployment, NOT part of site.yml — see APPS.md
   nginx.yml                    # application deployment, NOT part of site.yml — see APPS.md
@@ -308,6 +322,7 @@ server_roles/                  # workload enablement — separate change-control
   docker_host/                   # Docker CE, hardened daemon.json, audit/AIDE/firewall integration
   kubernetes_node/                # vanilla kubeadm, multi-version, pluggable runtime (containerd/CRI-O) + CNI (Calico/Flannel) + MetalLB
   postgresql_server/               # PGDG PostgreSQL, pgAudit, TLS, basic primary/replica streaming replication
+  mssql_server/                     # Microsoft SQL Server (mssql-server RPM), SQL Server Audit, TLS, EL9 only — see SERVER_ROLES.md
 apps/                           # application deployments on top of server_roles/ — separate again, see APPS.md
   netbox/                         # NetBox Docker Compose stack: nginx TLS proxy, external-DB-recommended, containerized Redis
   registry/                       # Private Docker/OCI registry: native TLS, mandatory htpasswd auth, immutable images by default
@@ -469,6 +484,18 @@ accept the defaults for):
 
 ```bash
 ansible-playbook playbooks/postgresql_server.yml -i inventories/staging/hosts.yml --check --diff
+```
+
+Turn a hardened EL9 host into a Microsoft SQL Server database server
+(same already-hardened-host caveat, `mssql_hosts` group, not
+`dbservers`; read [docs/SERVER_ROLES.md](docs/SERVER_ROLES.md) first —
+this role will not accept Microsoft's EULA for you, and the sa password
+and edition/PID are things you need to actually configure, not just
+accept the defaults for):
+
+```bash
+ansible-playbook playbooks/mssql_server.yml -i inventories/staging/hosts.yml \
+  -e mssql_accept_eula=true --check --diff
 ```
 
 Deploy NetBox on top of an already-provisioned Docker host (`netbox_hosts`

@@ -6,8 +6,13 @@
 # Runs server_roles/postgresql_server (see playbooks/postgresql_server.yml
 # — NOT part of playbooks/site.yml, same pattern as docker_hosts/k8s_nodes).
 # If you're actually running a different DB engine on some of these
-# hosts (Oracle 1521, SQL Server 1433, ...), postgresql_server isn't the
-# right role for them — this group_vars file assumes PostgreSQL.
+# hosts, postgresql_server isn't the right role for them — this
+# group_vars file assumes PostgreSQL. SQL Server hosts belong in the
+# separate `mssql_hosts` group instead (server_roles/mssql_server, see
+# inventories/production/group_vars/mssql_hosts.yml) — not folded in
+# here, same "own inventory group per engine" reasoning as
+# docker_hosts/k8s_nodes/netbox_hosts each having their own group rather
+# than sharing one.
 #
 # Zone-wide open within roles/firewalld_baseline's default-deny zone, not
 # source-restricted — same documented gap as docker_hosts/k8s_nodes (see

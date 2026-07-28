@@ -1,0 +1,5 @@
+---
+- name: Restart mssql-server
+  ansible.builtin.systemd:
+    name: "{{ mssql_service_name }}"
+    state: restarted

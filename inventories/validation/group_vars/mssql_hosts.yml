@@ -1,0 +1,53 @@
+---
+# CANONICAL COPY LIVES IN inventories/production/group_vars/mssql_hosts.yml
+# This is the IQ/OQ/PQ execution environment (see docs/VALIDATION.md) —
+# it must match production control policy exactly.
+#
+# Runs server_roles/mssql_server (see playbooks/mssql_server.yml — NOT
+# part of playbooks/site.yml). A separate database-engine group from
+# dbservers (server_roles/postgresql_server) — see the note in
+# group_vars/dbservers.yml.
+#
+# Zone-wide open within roles/firewalld_baseline's default-deny zone,
+# not source-restricted — same documented gap as dbservers/docker_hosts
+# (see docs/SERVER_ROLES.md). Keep in sync with mssql_port below if you
+# change it from the default.
+firewalld_rules:
+  - { port: "1433/tcp" }
+
+# --- Version -------------------------------------------------------------
+mssql_version: "2022"
+
+# --- Content source --------------------------------------------------------
+# Left at server_roles/mssql_server's own CHANGEME defaults here on
+# purpose — fill in once packages.microsoft.com is synced into Satellite
+# (see docs/SERVER_ROLES.md):
+# mssql_repo_baseurl: "https://satellite.gxp.example.internal/pulp/repos/GxP-Enterprise/production/mssql-server-2022"
+# mssql_repo_gpgkey: "https://satellite.gxp.example.internal/pub/RPM-GPG-KEY-microsoft"
+# mssql_tools_repo_baseurl: "https://satellite.gxp.example.internal/pulp/repos/GxP-Enterprise/production/mssql-tools"
+# mssql_tools_repo_gpgkey: "https://satellite.gxp.example.internal/pub/RPM-GPG-KEY-microsoft"
+
+# --- Licensing / EULA -----------------------------------------------------
+# Fails loudly until both are set deliberately (see
+# server_roles/mssql_server/tasks/setup.yml):
+# mssql_accept_eula: true
+# mssql_pid: "Standard"   # "Developer"/"Express" are non-production-licensed only
+
+# --- Secrets ---------------------------------------------------------------
+# Fails loudly if empty — supply via an ansible-vault encrypted
+# group_vars/host_vars file, e.g.
+# inventories/validation/group_vars/mssql_hosts.vault.yml:
+#   mssql_sa_password: "{{ vault_mssql_sa_password }}"
+
+# --- TLS -----------------------------------------------------------------------
+# Self-signed by default (see server_roles/mssql_server/defaults/main.yml).
+# Point these at a real CA-issued cert/key (local paths on the control
+# node) before this holds anything real:
+# mssql_ssl_cert_src: "/path/on/control/node/db02.crt"
+# mssql_ssl_key_src: "/path/on/control/node/db02.key"
+
+# --- Backup ------------------------------------------------------------------
+# Off by default — see server_roles/mssql_server/defaults/main.yml and
+# docs/SERVER_ROLES.md for why enabling this alone is not a backup
+# strategy.
+mssql_backup_enabled: false

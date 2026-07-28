@@ -443,3 +443,117 @@ that can hold several **unrelated** PostgreSQL instances — there's no
   directories for logically separate databases sharing hardware) — one
   instance per host is the assumed topology; a host wanting more is a
   variables/paths exercise this role doesn't parameterize for.
+
+## `mssql_server`
+
+Microsoft SQL Server on Microsoft's own `mssql-server` RPM (not a
+container). Run via `playbooks/mssql_server.yml` against the
+`mssql_hosts` inventory group — deliberately **not** `dbservers`
+(`postgresql_server`'s group). Each database engine gets its own
+inventory group in this repo, same reasoning as `docker_hosts`/
+`k8s_nodes`/`netbox_hosts` each being separate rather than one
+overloaded "workload" group — see the note in
+`group_vars/dbservers.yml`.
+
+### Platform support is narrower than this repo's other server_roles
+
+Every other `server_roles/` entry targets RHEL 9 **and** 10. This one
+doesn't: Microsoft only officially certifies specific RHEL major
+versions for `mssql-server`, and that support has historically lagged a
+new RHEL release by a long time — `mssql_supported_el_major_versions`
+(`defaults/main.yml`) is `["9"]` only, and `tasks/main.yml` fails loudly
+on anything else. AlmaLinux 9 works in practice via binary compatibility
+but is not itself a Microsoft-certified platform — flag that distinction
+for your validation package if it matters for your regulatory posture,
+same caveat this repo already carries for AlmaLinux against Red Hat's
+own Satellite entitlement model. `mssql_version` (`"2019"` or `"2022"`)
+is likewise an explicit, enumerated list (`mssql_supported_versions`),
+not an open-ended floor — unlike `postgresql_server`'s `postgresql_min_
+supported_version`, Microsoft's repo URL and package set genuinely
+differ per release and SQL Server ships far less often, so there's no
+stable naming formula to generalize.
+
+### Things that are NOT obvious and will bite you if skipped
+
+- **This role will not accept Microsoft's EULA on your behalf.**
+  `mssql_accept_eula` defaults to `false` and `tasks/setup.yml` fails
+  loudly until it's set `true` deliberately — read the actual EULA
+  first. Separately, `mssql_pid` defaults to `"Developer"` (full-featured,
+  but licensed for non-production use only under Microsoft's own terms)
+  so lab/staging just works out of the box; the role warns loudly every
+  run against `Developer`/`Express` rather than silently letting a
+  non-production-licensed edition end up in production.
+- **Two separate Microsoft repos, not one.** `mssql-server` gets its own
+  per-version repo file (`mssql-server-<version>.repo`); `mssql-tools18`
+  (bundling `sqlcmd` and the `msodbcsql18` ODBC driver, both required for
+  this role's own SQL Server Audit and backup tasks to work at all) comes
+  from Microsoft's general "prod" repo instead, and needs its own
+  separate `ACCEPT_EULA=Y` at install time for the ODBC driver
+  specifically.
+- **Initial setup is non-interactive and one-time only.** `tasks/setup.yml`
+  runs `mssql-conf -n setup` with `MSSQL_SA_PASSWORD`/`MSSQL_PID`/
+  `MSSQL_COLLATION`/`ACCEPT_EULA` as environment variables, gated on
+  `{{ mssql_data_dir }}/master.mdf` not existing yet — same
+  "initial-setup-only, no automated in-place major-version handling"
+  posture as `postgresql_server`'s `initdb`. Changing `mssql_collation`
+  or `mssql_pid` after this point needs Microsoft's own documented
+  rebuild procedure, not something this role automates.
+- **`mssql-conf` has no clean scriptable idempotency signal**, unlike
+  `firewall-cmd --get-log-denied`'s bare, parseable output —
+  `tasks/config.yml` reads each setting back with `mssql-conf get` first
+  and only calls `mssql-conf set` when the current value doesn't already
+  contain the desired one (a best-effort substring check, not an exact
+  match, since `mssql-conf get`'s output format isn't a documented
+  stable contract). Verify against your installed `mssql-conf` version
+  if a setting seems to re-apply every run when it shouldn't.
+- **SQL Server Audit is the GxP-relevant equivalent of `postgresql_server`'s
+  pgAudit**, not a native config-file GUC the way PostgreSQL's is — it's
+  a server audit object plus a server audit specification, created via a
+  templated, idempotent T-SQL script (`templates/audit_setup.sql.j2`,
+  `IF NOT EXISTS`/`IF ... is_state_enabled = 0` guards) that
+  `tasks/audit.yml` only actually runs when a pre-check finds the audit
+  missing or disabled. Re-review `mssql_audit_action_groups` against your
+  own risk assessment before relying on it verbatim, same caveat as every
+  other hardening default list in this repo.
+- **Backup is a mechanism, not a solution, same posture as
+  `postgresql_server`'s WAL archiving** — off by default;
+  `mssql_backup_enabled: true` schedules a cron-driven native
+  `BACKUP DATABASE` for every user database (system databases
+  deliberately excluded) to a local directory only. No offsite copy, no
+  retention policy, no restore drill, no differential/log backups. It
+  also runs as `sa` rather than a dedicated minimally-privileged backup
+  login — a documented gap, not a dedicated backup role, same "bring
+  your own real backup infrastructure" posture as PostgreSQL's WAL
+  archiving note. The `sa` password the cron job reads lives in a
+  root-only `0600` file on disk — plaintext, same trade-off `apps/netbox`
+  already accepts for its TLS key (this repo's host-level controls,
+  `roles/user_access_gxp` and `roles/auditd_gxp`, are what actually gate
+  that access, not file mode alone).
+- **Always On Availability Groups / Failover Cluster Instances are out
+  of scope**, same posture as `postgresql_server`'s "no Patroni/repmgr"
+  scoping — SQL Server HA on Linux needs Pacemaker/corosync clustering,
+  a different and much larger undertaking than this role's ambition
+  level. Single-instance-per-host only.
+- **TLS defaults to a self-signed certificate**, same posture and fix as
+  every other TLS-terminating role in this repo — replace
+  `mssql_ssl_cert_src`/`_key_src` with a real CA-issued cert/key before
+  this holds anything real. `mssql_force_encryption: true` by default
+  requires every client connection to be encrypted, not just
+  opportunistic.
+- **Firewalld access is zone-wide, not source-restricted**, same
+  documented gap as every other `server_roles/` group.
+
+### What's intentionally out of scope
+
+- **Always On Availability Groups, Failover Cluster Instances, any HA
+  orchestration** — see above.
+- **An actual backup solution** — native `BACKUP DATABASE` to local disk
+  is the mechanism, not the solution.
+- **A dedicated, minimally-privileged backup login** — the scheduled
+  backup job runs as `sa`; a purpose-built login with only `BACKUP
+  DATABASE` rights is a documented gap.
+- **Linked servers, SQL Server Agent jobs, Integration/Analysis/Reporting
+  Services** — this role stands up a bare database engine instance, not
+  the broader SQL Server platform.
+- **Multiple SQL Server instances on one host** — one instance per host
+  is the assumed topology, same posture as `postgresql_server`.

@@ -1,0 +1,152 @@
+---
+# Turns a hardened RHEL9/AlmaLinux9 host into a Microsoft SQL Server
+# database server (mssql-server, Microsoft's own RPM, not a container).
+# Runs against the `mssql_hosts` inventory group — deliberately NOT
+# folded into `dbservers` (see that group's own group_vars comment,
+# which already anticipated this: "if you're actually running a
+# different DB engine on some of these hosts... postgresql_server isn't
+# the right role for them"). See docs/SERVER_ROLES.md for the
+# operational caveats (Always On Availability Groups are out of scope,
+# backup is a mechanism not a solution, SQL Server Audit is the
+# GxP-relevant equivalent of server_roles/postgresql_server's pgAudit).
+
+# --- Platform support ------------------------------------------------------------
+# Microsoft officially certifies RHEL only, and only specific major
+# versions — RHEL 9 as of this role's authoring. Do NOT assume RHEL 10
+# support exists without checking Microsoft's current install docs
+# first; SQL-Server-on-Linux platform support has historically lagged a
+# new RHEL major by a long way. AlmaLinux 9 is binary-compatible and
+# works in practice, but it is not a Microsoft-certified platform the
+# way RHEL is — flag that distinction for your validation package if it
+# matters for your regulatory posture, same "binary-compatible but not
+# entitlement-equivalent" caveat this repo already carries for
+# AlmaLinux/Red Hat Satellite (see roles/satellite_registration).
+mssql_supported_el_major_versions:
+  - "9"
+
+# --- Version -----------------------------------------------------------------
+# Selects which Microsoft repo config gets installed
+# (packages.microsoft.com/config/rhel/<EL major>/mssql-server-<version>.repo)
+# — an explicit, enumerated list, same posture as
+# server_roles/kubernetes_node's k8s_supported_versions, NOT
+# server_roles/postgresql_server's open-ended floor: Microsoft's repo
+# URL and package set genuinely differ per SQL Server release, and SQL
+# Server ships far less frequently than a PostgreSQL/Kubernetes release,
+# so there's no stable naming formula to generalize the way PGDG's
+# postgresql<N> convention lets server_roles/postgresql_server go
+# open-ended. Extending this list to a new release is a deliberate,
+# reviewed change once you've verified the repo URL pattern still holds.
+mssql_version: "2022"   # 2019 | 2022
+mssql_supported_versions:
+  - "2019"
+  - "2022"
+
+# --- Package source --------------------------------------------------------------
+# Same Satellite-first posture as the other server_roles: sync
+# packages.microsoft.com's mssql-server repo into a Satellite custom
+# product/content view for a real estate; the public URL is the fallback
+# for lab/evaluation use.
+mssql_repo_baseurl: "CHANGEME"   # e.g. https://satellite.gxp.example.internal/pulp/repos/GxP-Enterprise/production/mssql-server-2022
+mssql_repo_gpgkey: "CHANGEME"
+mssql_public_repo_url: "https://packages.microsoft.com/config/rhel/{{ ansible_distribution_major_version }}/mssql-server-{{ mssql_version }}.repo"
+
+# mssql-tools18 (sqlcmd) needs its OWN repo — a separate Microsoft
+# product, not bundled with mssql-server's own repo definition. Verify
+# this is still the correct URL against Microsoft's current sqlcmd
+# install docs before relying on it — product repo layouts have moved
+# before.
+mssql_tools_repo_baseurl: "CHANGEME"
+mssql_tools_repo_gpgkey: "CHANGEME"
+mssql_tools_public_repo_url: "https://packages.microsoft.com/config/rhel/{{ ansible_distribution_major_version }}/prod.repo"
+
+# --- Paths / identity -------------------------------------------------------------
+mssql_data_dir: /var/opt/mssql/data
+mssql_log_dir: /var/opt/mssql/log
+mssql_service_name: mssql-server
+mssql_port: 1433
+mssql_sqlcmd_bin: /opt/mssql-tools18/bin/sqlcmd
+
+# Data directory sizing/placement (its own filesystem, sized for actual
+# retention needs) is a provisioning-time decision this role can't make
+# for you — same posture as server_roles/postgresql_server's own
+# equivalent note.
+
+# --- Licensing / edition -----------------------------------------------------------
+# "Developer" is full-featured but licensed for non-production use only
+# (dev/test/demo — Microsoft's own EULA terms, not this repo's
+# invention). Fine as the default so lab/staging just works;
+# tasks/setup.yml warns loudly every run against a non-{Standard,
+# Enterprise,EnterpriseCore} edition, same posture as this repo's
+# self-signed-TLS warnings elsewhere. Set to "Standard", "Enterprise",
+# "EnterpriseCore", "Express", or an actual 25-character product key for
+# anything real.
+mssql_pid: "Developer"
+mssql_accept_eula: false   # must be explicitly true — this role will not silently accept Microsoft's EULA on your behalf, see tasks/setup.yml
+
+# SA (system administrator) account password — vaulted, no default, so
+# an enabled-but-uncredentialed instance fails loudly rather than
+# standing up a server nobody can reach or, worse, letting mssql-conf
+# pick a password for you. SQL Server enforces its own password
+# complexity policy at setup time (8+ characters, 3 of 4 character
+# classes) — this role does not pre-validate that; mssql-conf setup
+# itself fails loudly if it's not met.
+mssql_sa_password: ""
+
+mssql_collation: "SQL_Latin1_General_CP1_CI_AS"   # Microsoft's own default — only takes effect at initial setup; changing it afterward needs a full system-database rebuild, not something this role automates
+
+# --- TLS -----------------------------------------------------------------------
+# Same self-signed-default/real-cert-pluggable pattern as
+# server_roles/postgresql_server and every apps/ role's TLS handling.
+mssql_tls_enabled: true
+mssql_ssl_cert_src: ""
+mssql_ssl_key_src: ""
+mssql_ssl_self_signed_days: 825
+mssql_force_encryption: true   # requires ALL client connections to be encrypted, not just opportunistic — same "secure by default" posture as postgresql_ssl_enabled
+
+# --- Resource limits ---------------------------------------------------------------
+mssql_memory_limit_mb: 4096   # size against actual hardware — mssql-conf's own default is 80% of physical RAM, which is almost never right for a shared host
+
+# --- Network / access control ------------------------------------------------------
+# firewalld_baseline's default-deny zone is the actual perimeter control
+# — see inventories/<env>/group_vars/mssql_hosts.yml.
+
+# --- SQL Server Audit (GxP SQL-level audit trail) -----------------------------------
+# The T-SQL equivalent of server_roles/postgresql_server's pgAudit —
+# writes to a local file target via a server audit + server audit
+# specification. Re-review the action group list against your own risk
+# assessment before relying on this verbatim, same caveat as every other
+# hardening default list in this repo.
+mssql_audit_enabled: true
+mssql_audit_name: "gxp_server_audit"
+mssql_audit_dir: /var/opt/mssql/audit
+mssql_audit_max_files: 100
+mssql_audit_max_file_size_mb: 100
+mssql_audit_action_groups:
+  - SCHEMA_OBJECT_CHANGE_GROUP
+  - DATABASE_OBJECT_CHANGE_GROUP
+  - DATABASE_OBJECT_PERMISSION_CHANGE_GROUP
+  - SERVER_ROLE_MEMBER_CHANGE_GROUP
+  - DATABASE_ROLE_MEMBER_CHANGE_GROUP
+  - SERVER_PERMISSION_CHANGE_GROUP
+  - DATABASE_PERMISSION_CHANGE_GROUP
+  - SUCCESSFUL_LOGIN_GROUP
+  - FAILED_LOGIN_GROUP
+  - AUDIT_CHANGE_GROUP
+  - SERVER_OBJECT_CHANGE_GROUP
+
+# --- Backup (mechanism, not a solution — same posture as
+# server_roles/postgresql_server's WAL archiving) ------------------------------------
+# Off by default. When on, a cron-scheduled T-SQL script runs a native
+# full BACKUP DATABASE for every user database (system databases
+# excluded deliberately — restoring master/model/msdb onto a different
+# instance is rarely what you want, and they're trivially rebuilt by
+# reinstalling) to a local directory. No offsite copy, no retention
+# policy, no restore drill, no differential/log backups, and it runs as
+# `sa` rather than a dedicated minimally-privileged backup login (a
+# documented gap — see docs/SERVER_ROLES.md) — bring your own backup
+# infrastructure (or Ola Hallengren's maintenance solution, this
+# ecosystem's de facto standard for this exact gap) before trusting this
+# with real data.
+mssql_backup_enabled: false
+mssql_backup_dir: /var/opt/mssql/backup
+mssql_backup_cron: "0 2 * * *"   # daily, off-hours

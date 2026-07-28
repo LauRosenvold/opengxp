@@ -1,0 +1,23 @@
+---
+galaxy_info:
+  role_name: mssql_server
+  description: >-
+    Microsoft SQL Server database server on Microsoft's own mssql-server
+    RPM (not a container), supporting SQL Server 2019/2022 on
+    Microsoft-certified RHEL major versions (AlmaLinux works via binary
+    compatibility but isn't Microsoft-certified — see
+    defaults/main.yml). Hardened via mssql-conf (TLS, forced encryption,
+    memory limit), SQL Server Audit for a GxP SQL-level audit trail (the
+    T-SQL equivalent of server_roles/postgresql_server's pgAudit), TLS
+    (self-signed default, real cert pluggable), and native backup as a
+    documented mechanism-not-a-solution. Always On Availability
+    Groups/Failover Cluster Instances are out of scope, same posture as
+    postgresql_server's "no Patroni" scoping. Runs against the
+    `mssql_hosts` inventory group. Lives in server_roles/, not roles/ —
+    see docs/SERVER_ROLES.md.
+  license: Apache-2.0
+  min_ansible_version: "2.15"
+  platforms:
+    - name: EL
+      versions: ["9"]
+dependencies: []

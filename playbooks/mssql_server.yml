@@ -1,0 +1,16 @@
+---
+# Workload-enablement playbook, not part of playbooks/site.yml — see
+# docs/SERVER_ROLES.md. Assumes hosts have already been through
+# playbooks/site.yml (or at least bootstrap.yml + hardening.yml).
+#
+# Usage:
+#   ansible-playbook playbooks/mssql_server.yml \
+#     -i inventories/staging/hosts.yml --check --diff
+
+- name: Configure Microsoft SQL Server database servers
+  hosts: mssql_hosts
+  become: true
+
+  roles:
+    - role: mssql_server
+      tags: [mssql]

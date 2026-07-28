@@ -1,0 +1,26 @@
+-- {{ ansible_managed | default('Managed by Ansible — server_roles/mssql_server') }}
+-- Full backup of every user database (system databases deliberately
+-- excluded — see defaults/main.yml). Local disk only: mechanism, not a
+-- backup solution, same posture as server_roles/postgresql_server's WAL
+-- archiving.
+SET NOCOUNT ON;
+DECLARE @name NVARCHAR(256);
+DECLARE @fileName NVARCHAR(512);
+DECLARE @dbCursor CURSOR;
+
+SET @dbCursor = CURSOR FOR
+    SELECT name FROM sys.databases
+    WHERE database_id > 4 AND state = 0;  -- skip master/tempdb/model/msdb, online only
+
+OPEN @dbCursor;
+FETCH NEXT FROM @dbCursor INTO @name;
+
+WHILE @@FETCH_STATUS = 0
+BEGIN
+    SET @fileName = N'{{ mssql_backup_dir }}/' + @name + N'_' + REPLACE(CONVERT(NVARCHAR(19), GETDATE(), 120), N':', N'-') + N'.bak';
+    BACKUP DATABASE @name TO DISK = @fileName WITH COMPRESSION, CHECKSUM;
+    FETCH NEXT FROM @dbCursor INTO @name;
+END;
+
+CLOSE @dbCursor;
+DEALLOCATE @dbCursor;
