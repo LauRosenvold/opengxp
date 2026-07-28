@@ -34,6 +34,12 @@
 # mirrors INTO, so those two stay on docker.io directly. That's the
 # documented chicken-and-egg exception; see the comment at the top of
 # apps/registry/defaults/main.yml.
+#
+# Every entry below mirrors a complete upstream image as-is — nothing
+# here is built from a Dockerfile in this repo. If that ever changes,
+# any custom image's FROM must be a Red Hat UBI base, not Alpine/Debian/
+# Ubuntu — see docs/APPS.md's "Base image policy for any custom
+# Dockerfile" for why.
 
 registry:
   # Must match apps/registry's registry_hostname var.

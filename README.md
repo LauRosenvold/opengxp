@@ -115,6 +115,12 @@ see [docs/PKI_DNS.md](docs/PKI_DNS.md)):
 | Registry web UI | `docker-registry-ui:2.5.7` | optional, loopback-bound by default |
 | nginx (standalone and NetBox's reverse-proxy sidecar) | `nginxinc/nginx-unprivileged:1.27-alpine` | `apps/nginx`, `apps/netbox` |
 
+Every image above is pulled complete from upstream and mirrored as-is via
+`tools/sync_images_with_skopeo.py` — none of them are built from a
+Dockerfile in this repo. If a custom image is ever added, its base must
+be Red Hat UBI, not Alpine/Debian/Ubuntu — see
+[docs/APPS.md](docs/APPS.md#base-image-policy-for-any-custom-dockerfile).
+
 ## Assumptions baked into this design
 
 These were explicit decisions, not defaults — revisit them if your

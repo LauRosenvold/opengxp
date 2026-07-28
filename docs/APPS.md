@@ -322,3 +322,26 @@ then `sync` copies that exact digest in and verifies the pushed manifest
 matches before calling it done. `registry_image`/`registry_ui_image`
 above are deliberately excluded from that pin list — see the note at the
 top of `apps/registry/defaults/main.yml` for why.
+
+## Base image policy for any custom Dockerfile
+
+Nothing in this repo builds a custom container image today — every image
+in `tools/image_pins.yml` and every `*_image` var above is a complete
+upstream image, pulled and mirrored as-is, never built from a
+`Dockerfile`/`Containerfile` here. If that ever changes — someone adds a
+Dockerfile to build something custom for `apps/` or `server_roles/` — its
+`FROM` must be a Red Hat UBI image (`registry.access.redhat.com/ubi9/ubi`
+or `ubi9/ubi-minimal`, matching whichever EL major the rest of the
+estate's on that release — see the OS table in
+[README.md](../README.md#supported-versions)), not Alpine/Debian/Ubuntu.
+
+This isn't a stylistic preference: this repo standardizes the *entire*
+managed-OS and RPM-content surface on the RHEL family already (RHEL/
+AlmaLinux hosts, Satellite-mirrored repos — see `docs/BASELINE_MAPPING.md`
+and the `kubernetes_node` RPM-repo note above). A UBI base keeps any
+custom image on the same glibc/vendor lineage as everything else in the
+estate instead of introducing a second OS family (and, for Alpine
+specifically, musl libc) with its own patch cadence and CVE feed to track
+separately for a GxP validation package. UBI is also redistributable
+without a subscription, so this doesn't create a new entitlement
+dependency the way pulling from `registry.redhat.io` proper would.
