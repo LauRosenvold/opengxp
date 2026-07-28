@@ -1,0 +1,51 @@
+---
+- name: Determine whether we're falling back to the public Cloudsmith repo
+  ansible.builtin.set_fact:
+    kurrentdb_using_public_repo: "{{ kurrentdb_repo_baseurl == 'CHANGEME' }}"
+
+- name: Warn when bypassing Satellite for KurrentDB content
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: {{ inventory_hostname }} is using the public Cloudsmith
+      kurrent-lts repo directly instead of a Satellite-managed content
+      view for KurrentDB. Fine for lab/evaluation — see
+      docs/SERVER_ROLES.md.
+  when: kurrentdb_using_public_repo
+
+- name: Configure Satellite-hosted KurrentDB repo
+  ansible.builtin.yum_repository:
+    name: "kurrentdb-satellite"
+    description: "KurrentDB (Satellite-managed content view)"
+    baseurl: "{{ kurrentdb_repo_baseurl }}"
+    gpgkey: "{{ kurrentdb_repo_gpgkey }}"
+    gpgcheck: true
+    enabled: true
+  when: not kurrentdb_using_public_repo
+
+- name: Import the public Cloudsmith GPG key (fallback only)
+  ansible.builtin.rpm_key:
+    key: "{{ kurrentdb_public_repo_gpgkey_url }}"
+    state: present
+  when: kurrentdb_using_public_repo
+
+- name: Install the public Cloudsmith repo definition (fallback only)
+  ansible.builtin.get_url:
+    url: "{{ kurrentdb_public_repo_config_url }}"
+    dest: /etc/yum.repos.d/kurrent-lts.repo
+    mode: "0644"
+    force: true
+  when: kurrentdb_using_public_repo
+  # Cloudsmith's own hosted .repo file, fetched directly — not Cloudsmith's
+  # setup.rpm.sh convenience script piped through sudo bash. Same "fetch
+  # the vendor's own file, don't execute an arbitrary remote script"
+  # posture as mssql_server's public-repo fallback (tasks/repo.yml there).
+
+- name: Install KurrentDB
+  ansible.builtin.dnf:
+    name: "kurrentdb-{{ kurrentdb_version }}"
+    state: present
+  # Pinned to an exact NVR, not a floating "whatever kurrentdb currently
+  # resolves to" — same "exact pin, bump deliberately" discipline as
+  # every other pinned version in this repo, made possible here (unlike
+  # etcd_cluster) because KurrentDB actually has a real package manager
+  # relationship to verify a version against.

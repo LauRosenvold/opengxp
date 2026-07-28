@@ -1,0 +1,5 @@
+---
+- name: Restart kurrentdb
+  ansible.builtin.systemd:
+    name: kurrentdb
+    state: restarted

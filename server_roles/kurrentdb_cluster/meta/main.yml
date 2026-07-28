@@ -1,0 +1,21 @@
+---
+galaxy_info:
+  role_name: kurrentdb_cluster
+  description: >-
+    KurrentDB cluster — the product formerly published as "EventStoreDB"
+    (Event Store Ltd rebranded in 2024; the last release actually shipped
+    under the EventStoreDB name, 23.10 LTS, reached end-of-support in
+    October 2025). Same event-sourcing/event-store database engine, new
+    package/repo names — this targets the current 24.10 LTS line. Official
+    Cloudsmith RPM repo (Satellite-content-view-with-public-fallback, same
+    pattern as postgresql_server/mssql_server), mandatory mutual TLS
+    between nodes (self-signed cluster CA by default, real-CA-pluggable),
+    gossip-seed cluster discovery computed from inventory. Runs against
+    the `kurrentdb_hosts` inventory group. Lives in server_roles/, not
+    roles/ — see docs/SERVER_ROLES.md.
+  license: Apache-2.0
+  min_ansible_version: "2.15"
+  platforms:
+    - name: EL
+      versions: ["9", "10"]
+dependencies: []

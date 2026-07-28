@@ -1,0 +1,26 @@
+---
+# Workload-enablement playbook, not part of playbooks/site.yml — see
+# docs/SERVER_ROLES.md. Assumes hosts have already been through
+# playbooks/site.yml (or at least bootstrap.yml + hardening.yml).
+#
+# Deliberately no `serial:` — the first host in kurrentdb_hosts generates
+# the cluster CA (if self-signed) before any other host can sign its own
+# cert from it, same "linear strategy synchronizes every host at each
+# task boundary" reasoning as server_roles/etcd_cluster and
+# server_roles/kubernetes_node.
+#
+# KurrentDB is the current name of what used to ship as "EventStoreDB" —
+# see server_roles/kurrentdb_cluster/defaults/main.yml for the rebrand
+# note if you came looking for that name.
+#
+# Usage:
+#   ansible-playbook playbooks/kurrentdb_cluster.yml \
+#     -i inventories/staging/hosts.yml --check --diff
+
+- name: Configure a KurrentDB cluster
+  hosts: kurrentdb_hosts
+  become: true
+
+  roles:
+    - role: kurrentdb_cluster
+      tags: [kurrentdb]

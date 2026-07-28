@@ -1,0 +1,173 @@
+---
+- name: Ensure the TLS directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ kurrentdb_user }}"
+    group: "{{ kurrentdb_group }}"
+    mode: "0750"
+  loop:
+    - "{{ kurrentdb_tls_dir }}"
+    - "{{ kurrentdb_tls_dir }}/ca"
+
+- name: Deploy a real CA cert and this host's own cert/key, if supplied
+  ansible.builtin.copy:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    owner: "{{ kurrentdb_user }}"
+    group: "{{ kurrentdb_group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - { src: "{{ kurrentdb_ssl_ca_src }}", dest: "{{ kurrentdb_tls_dir }}/ca/ca.crt", mode: "0644" }
+    - { src: "{{ kurrentdb_ssl_cert_src }}", dest: "{{ kurrentdb_tls_dir }}/node.crt", mode: "0644" }
+    - { src: "{{ kurrentdb_ssl_key_src }}", dest: "{{ kurrentdb_tls_dir }}/node.key", mode: "0600" }
+  loop_control:
+    label: "{{ item.dest }}"
+  when:
+    - kurrentdb_ssl_ca_src | length > 0
+    - kurrentdb_ssl_cert_src | length > 0
+    - kurrentdb_ssl_key_src | length > 0
+  notify: Restart kurrentdb
+
+# --- Self-signed cluster CA: generated once, on the first kurrentdb_hosts host,
+# then distributed to the rest via the control node — same model as
+# etcd_cluster's tasks/tls.yml; see that role's comment for the full
+# "fetch to the control node, then copy out, never directly between
+# managed hosts" reasoning. -------------------------------------------------------
+
+- name: Check whether the cluster CA already exists on this host
+  ansible.builtin.stat:
+    path: "{{ kurrentdb_tls_dir }}/ca/ca.crt"
+  register: kurrentdb_ca_stat
+  when: kurrentdb_ssl_ca_src | length == 0
+
+- name: Warn that a self-signed cluster CA is being generated
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: kurrentdb_ssl_ca_src is empty on {{ inventory_hostname }}
+      — generating (or, on hosts other than the first, receiving) a
+      self-signed cluster CA. Fine for lab/staging, NOT approved for
+      anything holding real data. Point kurrentdb_ssl_ca_src (cluster-
+      wide) and kurrentdb_ssl_cert_src/_key_src (per-host, in that
+      host's own host_vars) at a real CA-issued CA/cert/key once you
+      have one — see docs/SERVER_ROLES.md.
+  when:
+    - kurrentdb_ssl_ca_src | length == 0
+    - not kurrentdb_ca_stat.stat.exists
+
+- name: Generate the self-signed cluster CA (first kurrentdb host only)
+  ansible.builtin.command: >
+    openssl req -new -x509 -days {{ kurrentdb_ssl_self_signed_days }}
+    -nodes -text
+    -out {{ kurrentdb_tls_dir }}/ca/ca.crt
+    -keyout {{ kurrentdb_tls_dir }}/ca/ca.key
+    -subj "/CN=kurrentdb-cluster-ca"
+  when:
+    - kurrentdb_ssl_ca_src | length == 0
+    - inventory_hostname == (groups['kurrentdb_hosts'] | first)
+    - not kurrentdb_ca_stat.stat.exists
+  changed_when: true
+
+- name: Ensure the local artifact directory exists
+  ansible.builtin.file:
+    path: "{{ playbook_dir }}/../artifacts/kurrentdb_cluster_ca"
+    state: directory
+    mode: "0700"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  when: kurrentdb_ssl_ca_src | length == 0
+
+- name: Fetch the self-signed CA from the first kurrentdb host
+  ansible.builtin.fetch:
+    src: "{{ kurrentdb_tls_dir }}/ca/{{ item }}"
+    dest: "{{ playbook_dir }}/../artifacts/kurrentdb_cluster_ca/{{ item }}"
+    flat: true
+  loop:
+    - ca.crt
+    - ca.key
+  when:
+    - kurrentdb_ssl_ca_src | length == 0
+    - inventory_hostname == (groups['kurrentdb_hosts'] | first)
+  # ca.key leaving this host is unavoidable — every member needs it
+  # locally to sign its own node cert from the same CA. artifacts/
+  # kurrentdb_cluster_ca/ is control-node-local, already covered by
+  # .gitignore's blanket *.key rule.
+
+- name: Distribute the self-signed CA to every other kurrentdb host
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../artifacts/kurrentdb_cluster_ca/{{ item }}"
+    dest: "{{ kurrentdb_tls_dir }}/ca/{{ item }}"
+    owner: "{{ kurrentdb_user }}"
+    group: "{{ kurrentdb_group }}"
+    mode: "{{ '0644' if item == 'ca.crt' else '0600' }}"
+  loop:
+    - ca.crt
+    - ca.key
+  when:
+    - kurrentdb_ssl_ca_src | length == 0
+    - inventory_hostname != (groups['kurrentdb_hosts'] | first)
+    - not kurrentdb_ca_stat.stat.exists
+
+# --- This host's own node cert, signed by the cluster CA -------------------------
+
+- name: Check whether this host's own cert already exists
+  ansible.builtin.stat:
+    path: "{{ kurrentdb_tls_dir }}/node.crt"
+  register: kurrentdb_node_cert_stat
+  when: kurrentdb_ssl_cert_src | length == 0
+
+- name: Generate this host's private key and CSR
+  ansible.builtin.command: >
+    openssl req -new -newkey rsa:2048 -nodes
+    -keyout {{ kurrentdb_tls_dir }}/node.key
+    -out {{ kurrentdb_tls_dir }}/node.csr
+    -subj "/CN={{ kurrentdb_cert_common_name }}"
+    -addext "subjectAltName=DNS:{{ inventory_hostname }},IP:{{ ansible_default_ipv4.address }},IP:127.0.0.1"
+  when:
+    - kurrentdb_ssl_cert_src | length == 0
+    - not kurrentdb_node_cert_stat.stat.exists
+  changed_when: true
+  notify: Restart kurrentdb
+  # CN is the SAME fixed string (kurrentdb_cert_common_name) on every
+  # node, deliberately NOT this host's own hostname the way
+  # etcd_cluster's equivalent task uses inventory_hostname — KurrentDB
+  # authenticates a connecting peer by checking that its client cert's CN
+  # exactly matches its own cert's CN. SAN still carries this host's own
+  # identity for standard hostname verification. See
+  # defaults/main.yml's kurrentdb_cert_common_name comment.
+
+- name: Write the SAN extension file for signing
+  ansible.builtin.copy:
+    content: "subjectAltName=DNS:{{ inventory_hostname }},IP:{{ ansible_default_ipv4.address }},IP:127.0.0.1\n"
+    dest: "{{ kurrentdb_tls_dir }}/node.ext"
+    owner: "{{ kurrentdb_user }}"
+    group: "{{ kurrentdb_group }}"
+    mode: "0600"
+  when:
+    - kurrentdb_ssl_cert_src | length == 0
+    - not kurrentdb_node_cert_stat.stat.exists
+
+- name: Sign this host's cert with the cluster CA
+  ansible.builtin.command: >
+    openssl x509 -req -days {{ kurrentdb_ssl_self_signed_days }}
+    -in {{ kurrentdb_tls_dir }}/node.csr
+    -CA {{ kurrentdb_tls_dir }}/ca/ca.crt -CAkey {{ kurrentdb_tls_dir }}/ca/ca.key -CAcreateserial
+    -out {{ kurrentdb_tls_dir }}/node.crt
+    -extfile {{ kurrentdb_tls_dir }}/node.ext
+  when:
+    - kurrentdb_ssl_cert_src | length == 0
+    - not kurrentdb_node_cert_stat.stat.exists
+  changed_when: true
+  notify: Restart kurrentdb
+
+- name: Ensure correct ownership/permissions on the CA and this host's cert/key
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    owner: "{{ kurrentdb_user }}"
+    group: "{{ kurrentdb_group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - { path: "{{ kurrentdb_tls_dir }}/ca/ca.crt", mode: "0644" }
+    - { path: "{{ kurrentdb_tls_dir }}/node.crt", mode: "0644" }
+    - { path: "{{ kurrentdb_tls_dir }}/node.key", mode: "0600" }

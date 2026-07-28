@@ -1,0 +1,32 @@
+---
+# CANONICAL COPY LIVES IN inventories/production/group_vars/kurrentdb_hosts.yml
+# This is the IQ/OQ/PQ execution environment (see docs/VALIDATION.md) —
+# it must match production control policy exactly.
+#
+# Runs server_roles/kurrentdb_cluster (see playbooks/kurrentdb_cluster.yml
+# — NOT part of playbooks/site.yml). KurrentDB is the current name of
+# what used to ship as "EventStoreDB" — see
+# server_roles/kurrentdb_cluster/defaults/main.yml for the rebrand note.
+#
+# Zone-wide open within roles/firewalld_baseline's default-deny zone,
+# not source-restricted — same documented gap as dbservers/mssql_hosts/
+# etcd_hosts (see docs/SERVER_ROLES.md).
+firewalld_rules:
+  - { port: "2113/tcp" }   # KurrentDB HTTP/gRPC -- client traffic AND inter-node gossip
+  - { port: "1112/tcp" }   # KurrentDB internal TCP replication
+
+# --- Package source -----------------------------------------------------------
+# Left at server_roles/kurrentdb_cluster's own CHANGEME default here on
+# purpose — point at a Satellite-managed content view for KurrentDB
+# before production use:
+# kurrentdb_repo_baseurl: "https://satellite.gxp.example.internal/pulp/repos/GxP-Enterprise/production/kurrentdb-lts"
+# kurrentdb_repo_gpgkey: "https://satellite.gxp.example.internal/pub/RPM-GPG-KEY-kurrent"
+
+# --- TLS -----------------------------------------------------------------------
+# Self-signed cluster CA by default (see
+# server_roles/kurrentdb_cluster/defaults/main.yml). Point
+# kurrentdb_ssl_ca_src at a real CA-issued CA cert once you have one —
+# per-host kurrentdb_ssl_cert_src/_key_src then belong in each host's own
+# host_vars, not here, since every cert's SAN carries that host's own
+# address:
+# kurrentdb_ssl_ca_src: "/path/on/control/node/kurrentdb-cluster-ca.crt"

@@ -1,0 +1,31 @@
+---
+- name: Ensure the data directory exists
+  ansible.builtin.file:
+    path: "{{ kurrentdb_data_dir }}"
+    state: directory
+    owner: "{{ kurrentdb_user }}"
+    group: "{{ kurrentdb_group }}"
+    mode: "0750"
+
+- name: Ensure the log directory exists
+  ansible.builtin.file:
+    path: "{{ kurrentdb_log_dir }}"
+    state: directory
+    owner: "{{ kurrentdb_user }}"
+    group: "{{ kurrentdb_group }}"
+    mode: "0750"
+
+- name: Render the KurrentDB config file
+  ansible.builtin.template:
+    src: kurrentdb.conf.j2
+    dest: "{{ kurrentdb_config_dir }}/kurrentdb.conf"
+    owner: "{{ kurrentdb_user }}"
+    group: "{{ kurrentdb_group }}"
+    mode: "0640"
+  notify: Restart kurrentdb
+
+- name: Ensure KurrentDB is enabled and running
+  ansible.builtin.systemd:
+    name: kurrentdb
+    state: started
+    enabled: true

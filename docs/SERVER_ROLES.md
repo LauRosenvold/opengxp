@@ -817,3 +817,86 @@ this role.
   beyond the retention window itself** — this is explicitly temporary,
   working storage; if something in a share needs to survive, that's a
   separate, deliberate copy to somewhere else, not this role's job.
+
+## `kurrentdb_cluster`
+
+A KurrentDB cluster. **KurrentDB is the current name of what used to
+ship as "EventStoreDB"** — Event Store Ltd rebranded the product in
+2024, and the last release actually published under the EventStoreDB
+name (23.10 LTS) reached end-of-support in October 2025. Same
+event-sourcing/event-store database engine underneath, new package/repo
+names — if you came looking for "eventstoredb", this is it, targeting
+the current 24.10 LTS line (`kurrentdb_version` in `defaults/main.yml`).
+Run via `playbooks/kurrentdb_cluster.yml` against the `kurrentdb_hosts`
+inventory group.
+
+Structurally this role is a hybrid of two patterns already in this repo:
+package installation follows `postgresql_server`/`mssql_server`'s
+Satellite-content-view-with-public-fallback approach (`tasks/repo.yml`),
+because — unlike `etcd_cluster` — KurrentDB has a real, consistent
+official RPM (Cloudsmith-hosted `kurrentdb` package); but the cluster
+bootstrap and mutual-TLS shape (`tasks/tls.yml`) closely follows
+`etcd_cluster`'s, because KurrentDB is, like etcd, a gossip-clustered
+store where every node has to verify every *other* node's identity, not
+a single-instance engine with an optional replica the way
+`postgresql_server`/`mssql_server` are.
+
+### Things that are NOT obvious and will bite you if skipped
+
+- **Every node's certificate must share the exact same Common Name.**
+  Unlike `etcd_cluster`'s TLS (each peer's CN is its own hostname),
+  KurrentDB authenticates a connecting peer by checking that its client
+  certificate's CN exactly matches its own certificate's CN
+  (`CertificateReservedNodeCommonName`, auto-read from each node's own
+  cert as of 23.10+). `tasks/tls.yml` signs every node's cert with the
+  same fixed `kurrentdb_cert_common_name` value for exactly this reason
+  — changing it per-host (the instinct anyone familiar with
+  `etcd_cluster` will have) makes every node reject every other node.
+  SAN still carries each node's own hostname/IP for standard client-side
+  hostname verification.
+- **`TrustedRootCertificatesPath` is a directory, not a single file.**
+  `tasks/tls.yml` keeps the cluster CA in its own `tls/ca/` subdirectory
+  for exactly this reason, separate from each node's own `node.crt`/
+  `node.key` one level up.
+- **"Secure by default" is not configurable off here.** KurrentDB v20+
+  refuses to run without valid TLS config unless you explicitly set
+  `Insecure: true` — this role never sets it, same "TLS is not optional
+  for this role" posture as `etcd_cluster`, stricter than
+  `postgresql_server`/`mssql_server` where TLS is opt-in.
+- **`ClusterSize` and `GossipSeed` are computed fresh from
+  `kurrentdb_hosts` group membership on every run**, not hand-set.
+  `templates/kurrentdb.conf.j2` renders both from `groups['kurrentdb_hosts']`
+  directly — add or remove a host from the inventory group and every
+  member's rendered config (and restart) reflects it on the next run.
+  This is config regeneration, not a live cluster membership operation —
+  KurrentDB has its own admin API/CLI for actually adding/removing a
+  member from an already-running cluster, which this role does not
+  automate, same "bootstrap-shaped, not membership-change-shaped"
+  posture as `etcd_cluster`.
+- **The public Cloudsmith repo path fetches a vendor-hosted `.repo`
+  file directly** (`kurrentdb_public_repo_config_url`), the same
+  `get_url`-not-`curl|bash` posture as `mssql_server`'s public-repo
+  fallback — not Cloudsmith's own `setup.rpm.sh` convenience script,
+  which pipes an unreviewed remote script through `sudo bash`.
+- **The `kurrentdb` RPM creates its own system account** (assumed to be
+  named `kurrentdb`) — this role doesn't create it the way
+  `etcd_cluster` creates etcd's, because that role has no package to do
+  it for it. Verify with `getent passwd kurrentdb` after a first install
+  in your environment before trusting `kurrentdb_user`/`kurrentdb_group`
+  blindly.
+- **Firewalld access is zone-wide, not source-restricted**, same
+  documented gap as every other `server_roles/` group.
+
+### What's intentionally out of scope
+
+- **Cluster membership changes after initial bootstrap** (adding a
+  member, replacing a failed one) — see above.
+- **Projections, persistent subscriptions tuning, or any
+  application-level stream/schema design** — this role stands up a bare
+  KurrentDB cluster, not an event-sourcing architecture on top of it.
+- **Backup/snapshot automation** — same "mechanism vs. solution" posture
+  as `postgresql_server`'s WAL archiving and `etcd_cluster`'s
+  `etcdutl snapshot save`.
+- **Multi-datacenter/WAN-aware topologies, read-only replicas** — this
+  role stands up one flat, same-DC cluster from a static inventory
+  group, nothing more.

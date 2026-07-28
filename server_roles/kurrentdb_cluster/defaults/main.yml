@@ -1,0 +1,106 @@
+---
+# Turns a hardened RHEL9/RHEL10/AlmaLinux9/AlmaLinux10 host into a member
+# of a KurrentDB cluster. KurrentDB is the current name of what used to
+# ship as "EventStoreDB" — Event Store Ltd rebranded the product in 2024,
+# and the last release actually published under the EventStoreDB name
+# (23.10 LTS) reached end-of-support in October 2025. Same underlying
+# event-sourcing/event-store database engine, new package/repo names — if
+# you came looking for "eventstoredb", this is it. Runs against the
+# `kurrentdb_hosts` inventory group. See docs/SERVER_ROLES.md.
+
+# --- Version / package source --------------------------------------------------
+# Unlike server_roles/etcd_cluster, KurrentDB DOES have a consistent
+# official RPM across RHEL/AlmaLinux versions (Cloudsmith-hosted), so this
+# role follows the same Satellite-content-view-with-public-fallback
+# pattern as postgresql_server/mssql_server instead of etcd_cluster's
+# download-and-checksum-a-tarball approach.
+#
+# kurrent-lts is deliberately the narrowest of Kurrent's three public
+# channels (kurrent-lts / kurrent-latest / kurrent-preview) — LTS-only,
+# no short-term-support or preview builds. 24.10 is the current LTS line
+# (supported through October 2026); verify
+# https://cloudsmith.io/~eventstore/repos/kurrent-lts/packages/ for the
+# current latest patch in that line before bumping past this, same
+# "verify before floating a new tag" posture as every other pinned
+# external version in this repo.
+kurrentdb_version: "24.10.14"
+
+# Satellite-managed content view (production path) — left CHANGEME by
+# default, same posture as postgresql_repo_baseurl/mssql_repo_baseurl.
+kurrentdb_repo_baseurl: "CHANGEME"
+kurrentdb_repo_gpgkey: "CHANGEME"
+
+# Public Cloudsmith repo (fallback only — see tasks/repo.yml). Fetched as
+# a plain .repo file, not by piping Cloudsmith's setup.rpm.sh convenience
+# script through sudo bash — same "fetch the vendor's own file, don't
+# execute an arbitrary remote script" posture as mssql_server's own
+# public-repo fallback. {{ ansible_distribution_major_version }} covers
+# both RHEL and AlmaLinux (Cloudsmith's "el" distro family covers both).
+kurrentdb_public_repo_config_url: "https://packages.kurrent.io/public/kurrent-lts/config.rpm.txt?distro=el&codename={{ ansible_distribution_major_version }}"
+kurrentdb_public_repo_gpgkey_url: "https://packages.kurrent.io/public/kurrent-lts/gpg.C39876BC6AE970D8.key"
+
+# The kurrentdb RPM creates its own system account at install time — this
+# role doesn't create it the way etcd_cluster creates etcd's (that role
+# has no package at all to do it for it). "kurrentdb" is the expected
+# name; verify with `getent passwd kurrentdb` after a first install in
+# your environment before trusting this blindly, same "verify against
+# your installed version" caveat this repo applies elsewhere (e.g.
+# mssql_server's repo-URL note, etcd_cluster's etcdctl-syntax note).
+kurrentdb_user: kurrentdb
+kurrentdb_group: kurrentdb
+
+kurrentdb_config_dir: /etc/kurrentdb
+kurrentdb_data_dir: /var/lib/kurrentdb
+kurrentdb_log_dir: /var/log/kurrentdb
+kurrentdb_tls_dir: "{{ kurrentdb_config_dir }}/tls"
+
+# Data directory sizing/placement (its own filesystem, sized for actual
+# retention needs) is a provisioning-time decision this role can't make
+# for you — same posture as postgresql_server's equivalent note.
+
+# --- Cluster topology -----------------------------------------------------------
+# KurrentDB's own defaults, rarely changed. NodePort carries BOTH client
+# HTTP/gRPC traffic AND inter-node gossip (a single unified port since
+# v20+) — ReplicationPort is the separate internal-TCP channel used for
+# the actual data replication stream between nodes. ClusterSize and
+# GossipSeed are NOT set here — templates/kurrentdb.conf.j2 computes both
+# fresh from the current kurrentdb_hosts group membership every run.
+kurrentdb_node_port: 2113
+kurrentdb_replication_port: 1112
+
+# --- TLS -----------------------------------------------------------------------
+# KurrentDB has been "secure by default" since v20 — Insecure: true is a
+# real config option but this role never sets it, unlike TLS being
+# opt-in for e.g. postgresql_server. Same shared-CA-not-a-bare-self-
+# signed-leaf reasoning as etcd_cluster: every node has to verify every
+# OTHER node's cert (mutual TLS), which needs a CA all of them trust — a
+# per-host self-signed leaf isn't enough. If kurrentdb_ssl_ca_src is
+# empty, tasks/tls.yml generates a small self-signed CA once (on the
+# first kurrentdb_hosts host) and distributes it — same "fetch to the
+# control node, then copy out, never directly between managed hosts"
+# model as etcd_cluster/kubernetes_node's external-etcd CA distribution
+# and provisioning/certificate_enrollment. If you supply a real CA
+# (kurrentdb_ssl_ca_src), you're also on the hook for this host's own
+# cert/key (kurrentdb_ssl_cert_src/_key_src, set in THIS HOST's own
+# host_vars, not group_vars, since each cert's SAN carries that host's
+# own address).
+kurrentdb_ssl_ca_src: ""
+kurrentdb_ssl_cert_src: ""
+kurrentdb_ssl_key_src: ""
+kurrentdb_ssl_self_signed_days: 825
+
+# KurrentDB authenticates a connecting peer by checking that its client
+# cert's Common Name exactly matches its own cert's CN
+# (CertificateReservedNodeCommonName, auto-read from each node's own cert
+# as of 23.10+) — every node's cert needs the SAME CN, deliberately NOT
+# etcd_cluster's per-host-hostname CN. tasks/tls.yml uses this literal
+# value on every node; don't set it per-host, or every node will reject
+# every other node.
+kurrentdb_cert_common_name: "kurrentdb-node"
+
+# --- Resource / retention tuning (conservative starting points — size these
+# against actual workload, this is not a performance tuning role) ----------------
+# Left at KurrentDB's own built-in defaults deliberately — unlike
+# postgresql_server/mssql_server's engines, KurrentDB's defaults are
+# already conservative for a fresh cluster; revisit once you have real
+# throughput/retention numbers to tune against.

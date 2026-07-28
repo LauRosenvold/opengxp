@@ -101,6 +101,7 @@ see [docs/PKI_DNS.md](docs/PKI_DNS.md)):
 | PostgreSQL (PGDG) | 15+ (open-ended — no fixed ceiling, see `postgresql_min_supported_version`) | `postgresql_version` in `inventories/<env>/group_vars/dbservers.yml` (default `16`); see [docs/SERVER_ROLES.md](docs/SERVER_ROLES.md) for the one forward-compat risk (`postgresql_pgaudit_package`) |
 | Microsoft SQL Server | 2019, 2022 (`mssql_supported_versions`, enumerated — see [docs/SERVER_ROLES.md](docs/SERVER_ROLES.md) for why this can't go open-ended the way PostgreSQL does); **EL9 only**, RHEL10/AlmaLinux10 not yet Microsoft-certified | `mssql_version` in `inventories/<env>/group_vars/mssql_hosts.yml` (default `2022`) |
 | etcd (standalone, `server_roles/etcd_cluster`) | 3.5.17 | `etcd_version` in `inventories/<env>/group_vars/etcd_hosts.yml`; pinned to a specific upstream GitHub release, checksum-verified via `etcd_release_sha256` — not a distro package |
+| KurrentDB (`server_roles/kurrentdb_cluster`, the current name of what used to ship as "EventStoreDB") | 24.10.14 (LTS) | `kurrentdb_version` in `inventories/<env>/group_vars/kurrentdb_hosts.yml`; official Cloudsmith RPM (`kurrentdb` package), same Satellite-content-view-with-public-fallback pattern as PostgreSQL/SQL Server above |
 | Docker CE | latest from the distro-appropriate `docker-ce` repo | not independently version-pinned — tracks whatever that repo currently ships |
 | Samba / nfs-utils (`server_roles/file_share_server`) | latest from the OS's own repos | not independently version-pinned, same posture as Docker CE above — no separate content source, rides `roles/patch_management` |
 
@@ -237,6 +238,20 @@ environment differs:
   etcd. See [docs/SERVER_ROLES.md](docs/SERVER_ROLES.md)'s
   `etcd_cluster` section, including its comparison table against the
   `kubernetes_node` option.
+- **`server_roles/kurrentdb_cluster` installs KurrentDB — the current
+  name of what used to ship as "EventStoreDB."** Event Store Ltd
+  rebranded in 2024; the last EventStoreDB-named release (23.10 LTS)
+  reached end-of-support in October 2025, so this role targets the
+  current 24.10 LTS line under the new `kurrentdb` package/repo names.
+  Structurally a hybrid: package installation follows
+  `postgresql_server`/`mssql_server`'s Satellite-repo-with-public-
+  fallback pattern (KurrentDB, unlike etcd, has a real official RPM),
+  but cluster bootstrap and mutual TLS follow `etcd_cluster`'s shape —
+  with one sharp difference: every node's certificate must carry the
+  *same* Common Name, not its own hostname, or nodes reject each other.
+  Runs against its own `kurrentdb_hosts` inventory group. See
+  [docs/SERVER_ROLES.md](docs/SERVER_ROLES.md)'s `kurrentdb_cluster`
+  section before using this on anything real.
 - **`server_roles/file_share_server` is a TEMPORARY SMB/NFS file
   server — age-based automatic cleanup is on by default, not opt-in.**
   Files older than each share's own retention window (30 days unless
@@ -329,6 +344,7 @@ playbooks/
   postgresql_server.yml        # workload enablement, NOT part of site.yml
   mssql_server.yml             # workload enablement, NOT part of site.yml
   etcd_cluster.yml             # workload enablement, NOT part of site.yml — standalone etcd, no Kubernetes involved
+  kurrentdb_cluster.yml         # workload enablement, NOT part of site.yml — KurrentDB (formerly EventStoreDB) cluster
   file_share_server.yml        # workload enablement, NOT part of site.yml — temporary SMB/NFS file server, cleanup on by default
   netbox.yml                   # application deployment, NOT part of site.yml — see APPS.md
   registry.yml                 # application deployment, NOT part of site.yml — see APPS.md
@@ -364,6 +380,7 @@ server_roles/                  # workload enablement — separate change-control
   postgresql_server/               # PGDG PostgreSQL, pgAudit, TLS, basic primary/replica streaming replication
   mssql_server/                     # Microsoft SQL Server (mssql-server RPM), SQL Server Audit, TLS, EL9 only — see SERVER_ROLES.md
   etcd_cluster/                      # standalone etcd (pinned upstream binary release, no Kubernetes tooling), mutual TLS — see SERVER_ROLES.md
+  kurrentdb_cluster/                   # KurrentDB (formerly EventStoreDB) cluster, official RPM repo, mutual TLS — see SERVER_ROLES.md
   file_share_server/                  # temporary SMB/NFSv4 file server, mandatory auth on both, age-based auto-cleanup on by default — see SERVER_ROLES.md
 apps/                           # application deployments on top of server_roles/ — separate again, see APPS.md
   netbox/                         # NetBox Docker Compose stack: nginx TLS proxy, external-DB-recommended, containerized Redis
@@ -549,6 +566,16 @@ until you supply them):
 
 ```bash
 ansible-playbook playbooks/etcd_cluster.yml -i inventories/staging/hosts.yml --check --diff
+```
+
+Stand up a KurrentDB cluster — the current name of what used to ship as
+"EventStoreDB" (`kurrentdb_hosts` group; read
+[docs/SERVER_ROLES.md](docs/SERVER_ROLES.md) first, especially the note
+that every node's certificate needs the *same* Common Name, not its own
+hostname the way `etcd_cluster`'s does):
+
+```bash
+ansible-playbook playbooks/kurrentdb_cluster.yml -i inventories/staging/hosts.yml --check --diff
 ```
 
 Stand up a temporary SMB/NFS file server (`file_share_hosts` group;

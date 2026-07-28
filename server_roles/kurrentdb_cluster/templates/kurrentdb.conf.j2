@@ -1,0 +1,27 @@
+# {{ ansible_managed | default('Managed by Ansible — server_roles/kurrentdb_cluster') }}
+# Bootstrap-shaped, same posture as etcd_cluster's config template:
+# ClusterSize/GossipSeed below are recomputed from the current
+# kurrentdb_hosts group membership on every run. Adding/removing a host
+# from the inventory group and re-running changes this file (and
+# restarts the service on every member) — it does NOT perform any live
+# cluster membership operation itself. KurrentDB has its own admin
+# API/CLI for actually adding or removing a member from a running
+# cluster; that is not automated here.
+ClusterSize: {{ groups['kurrentdb_hosts'] | length }}
+DiscoverViaDns: false
+GossipSeed:
+{% for host in groups['kurrentdb_hosts'] if host != inventory_hostname %}
+  - {{ hostvars[host].ansible_default_ipv4.address }}:{{ kurrentdb_node_port }}
+{% endfor %}
+
+NodeIp: {{ ansible_default_ipv4.address }}
+NodePort: {{ kurrentdb_node_port }}
+ReplicationIp: {{ ansible_default_ipv4.address }}
+ReplicationPort: {{ kurrentdb_replication_port }}
+
+Db: {{ kurrentdb_data_dir }}
+Log: {{ kurrentdb_log_dir }}
+
+CertificateFile: {{ kurrentdb_tls_dir }}/node.crt
+CertificatePrivateKeyFile: {{ kurrentdb_tls_dir }}/node.key
+TrustedRootCertificatesPath: {{ kurrentdb_tls_dir }}/ca

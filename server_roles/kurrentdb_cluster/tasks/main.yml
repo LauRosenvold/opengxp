@@ -1,0 +1,40 @@
+---
+# Order matters, same principle as this repo's other server_roles: repo
+# before package, package before TLS material, TLS material before the
+# config file that references it, config before the service starts.
+
+- name: Fail loudly if a real CA is set but this host's own cert is missing
+  ansible.builtin.assert:
+    that:
+      - kurrentdb_ssl_cert_src | length > 0
+      - kurrentdb_ssl_key_src | length > 0
+    fail_msg: >-
+      kurrentdb_ssl_ca_src is set (a real CA) but kurrentdb_ssl_cert_src/
+      _key_src are not — every host needs its own cert signed by that CA.
+      Set them in THIS HOST's own host_vars (the SAN has to carry this
+      host's own address), not here.
+  when: kurrentdb_ssl_ca_src | length > 0
+
+- name: Warn if the cluster has an even, non-single node count
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: kurrentdb_hosts has {{ groups['kurrentdb_hosts'] | length }}
+      members — an even number greater than one risks split-brain
+      election ties. KurrentDB's own guidance is an odd cluster size (3
+      or 5), or exactly 1 for a non-HA single node.
+  when:
+    - groups['kurrentdb_hosts'] | length > 1
+    - groups['kurrentdb_hosts'] | length is even
+  run_once: true
+
+- name: Install KurrentDB
+  ansible.builtin.include_tasks: repo.yml
+  tags: [prep]
+
+- name: Configure TLS
+  ansible.builtin.include_tasks: tls.yml
+  tags: [prep]
+
+- name: Deploy configuration and start KurrentDB
+  ansible.builtin.include_tasks: config.yml
+  tags: [config]
