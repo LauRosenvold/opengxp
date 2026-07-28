@@ -2,15 +2,18 @@
 # Creates (or removes) a VM from a template on a hypervisor cluster —
 # vCenter (community.vmware.vmware_guest), Hyper-V (ansible.windows
 # PowerShell against the Hyper-V host via WinRM, cloning via
-# `Import-VM -Copy -GenerateNewId` from an exported template VM), or
-# Proxmox VE (community.proxmox.proxmox_kvm against the PVE REST API).
-# See docs/PROVISIONING.md for why this is its own top-level tier
+# `Import-VM -Copy -GenerateNewId` from an exported template VM), Proxmox
+# VE (community.proxmox.proxmox_kvm against the PVE REST API), or
+# KVM/libvirt (a rendered bash script run on the KVM host itself via
+# normal SSH, driving virsh/qemu-img/virt-install directly — see
+# tasks/kvm.yml for why no collection dependency was added for this
+# path). See docs/PROVISIONING.md for why this is its own top-level tier
 # (provisioning/, not roles/server_roles/apps) — it runs against a
-# hypervisor management API, not a managed Linux host, and the host it
-# creates doesn't exist for Ansible to configure at all until this
-# finishes.
+# hypervisor management API or host, not a managed Linux host in the
+# usual sense, and the host it creates doesn't exist for Ansible to
+# configure at all until this finishes.
 
-provisioning_hypervisor: vcenter   # vcenter | hyperv | proxmox
+provisioning_hypervisor: vcenter   # vcenter | hyperv | proxmox | kvm
 
 # --- Common VM spec (all hypervisors) -------------------------------------------
 vm_name: "CHANGEME"                 # becomes the hypervisor-side VM name — NOT automatically the eventual OS hostname, see docs/PROVISIONING.md
@@ -122,6 +125,38 @@ proxmox_cloudinit_nameserver: ""
 proxmox_cloudinit_searchdomain: ""
 proxmox_cloudinit_sshkeys: ""         # one or more public keys, newline-separated — same format `qm set --sshkeys` expects
 proxmox_cloudinit_user: ""            # cloud-init user to create; leave empty to rely on the template's own baked-in user/key instead
+
+# ================================================================================
+# KVM / libvirt
+# ================================================================================
+# The play targeting KVM connects to an inventory host in the `kvm_hosts`
+# group (normal SSH/become, like any other Linux host in this repo — NOT
+# a remote management API the way vCenter/Proxmox are, and NOT WinRM the
+# way Hyper-V is) — these vars describe what to build once connected, not
+# how to connect. tasks/kvm.yml renders and runs a bash script on that
+# host, same "script does the actual work, Ansible ships/runs/reports
+# it" shape as Hyper-V's PowerShell script, because — like Hyper-V — no
+# clean idempotent Ansible module exists for "clone-from-template with
+# guest customization" the way vmware_guest/proxmox_kvm provide.
+kvm_template_image_path: "CHANGEME"   # e.g. /var/lib/libvirt/images/templates/rhel9-golden.qcow2 — a qcow2 base image, backing-file-cloned per VM, this role never writes to it directly
+kvm_disk_pool_dir: /var/lib/libvirt/images   # where per-VM disks/seed ISOs get created — must be a path libvirt's default storage pool (or your own SELinux fcontext, if you change this) already covers
+kvm_extra_disk_filename_suffix: "-data"       # the extra disk (vm_extra_disk_gb) is created as {{ vm_name }}{{ kvm_extra_disk_filename_suffix }}.qcow2
+kvm_disk_bus: virtio
+kvm_bridge: "CHANGEME"                # e.g. br0 — an already-configured Linux bridge on the KVM host; this role does not create one
+kvm_network_model: virtio
+kvm_os_variant: "CHANGEME"            # an `osinfo-query os` short ID, e.g. rhel9.0 or almalinux9 — verify against the KVM host's own `osinfo-query os` output; a wrong value doesn't fail loudly, it just applies worse default device models
+
+# Cloud-init guest customization via a generated NoCloud seed ISO
+# (genisoimage — assumed already installed on the KVM host, this role
+# does not install it). Only built at all if kvm_cloudinit_ip_config or
+# kvm_cloudinit_user is set. Leave both empty to skip this entirely and
+# let the template's own baked-in defaults apply — same "don't clobber a
+# baked-in default with an empty string" posture as
+# vcenter_customization_domain/proxmox_cloudinit_ip_config above.
+kvm_cloudinit_ip_config: ""           # cloud-init network-config v2 "addresses" value, e.g. "10.20.10.60/24" — empty = DHCP (whatever the template itself defaults to)
+kvm_cloudinit_nameserver: ""
+kvm_cloudinit_user: ""                # cloud-init user to create; leave empty to rely on the template's own baked-in user/key instead
+kvm_cloudinit_sshkeys: []             # list of public key strings, only used if kvm_cloudinit_user is also set
 
 # --- Output ------------------------------------------------------------------
 # Where a reviewable inventory snippet gets written after a successful

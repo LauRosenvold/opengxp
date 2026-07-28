@@ -1,0 +1,109 @@
+#!/bin/bash
+# {{ ansible_managed | default('Managed by Ansible — provisioning/vm_provision') }}
+# Rendered once per run and executed on the KVM/libvirt host itself (over
+# normal SSH) — see tasks/kvm.yml. Idempotent: checks for an existing
+# domain by name before cloning or removing anything. Assumes virsh,
+# qemu-img, virt-install, and (only if cloud-init customization is
+# requested below) genisoimage are already installed on this host — this
+# role does not install them, same "the hypervisor's own tooling is
+# already there" posture as Hyper-V's PowerShell script assumes
+# Import-VM/Get-VM exist.
+set -euo pipefail
+
+VM_NAME="{{ vm_name }}"
+
+{% if vm_state == 'absent' %}
+if virsh dominfo "$VM_NAME" &>/dev/null; then
+    echo "Stopping and removing $VM_NAME"
+    virsh destroy "$VM_NAME" 2>/dev/null || true
+    virsh undefine "$VM_NAME" --remove-all-storage --nvram 2>/dev/null \
+        || virsh undefine "$VM_NAME" --remove-all-storage
+    echo "CHANGED: removed $VM_NAME and its disks"
+else
+    echo "OK: $VM_NAME does not exist, nothing to remove"
+fi
+{% else %}
+if virsh dominfo "$VM_NAME" &>/dev/null; then
+    echo "OK: $VM_NAME already exists, not re-cloning from template"
+else
+    echo "Cloning $VM_NAME from template {{ kvm_template_image_path }}"
+
+    BOOT_DISK="{{ kvm_disk_pool_dir }}/${VM_NAME}.qcow2"
+    # No explicit size — a backing-file clone with no -o/preallocation
+    # size argument inherits the template's own virtual size exactly,
+    # same "boot disk is the template's own size, never resized here"
+    # posture as vm_extra_disk_gb being a SEPARATE additional disk on
+    # every other hypervisor path in this role, not a resize of the OS
+    # disk itself.
+    qemu-img create -f qcow2 -F qcow2 -b "{{ kvm_template_image_path }}" "$BOOT_DISK"
+
+    DISK_ARGS=(--disk "path=${BOOT_DISK},bus={{ kvm_disk_bus }}")
+
+{% if vm_extra_disk_gb | int > 0 %}
+    EXTRA_DISK="{{ kvm_disk_pool_dir }}/${VM_NAME}{{ kvm_extra_disk_filename_suffix }}.qcow2"
+    qemu-img create -f qcow2 "$EXTRA_DISK" {{ vm_extra_disk_gb }}G
+    DISK_ARGS+=(--disk "path=${EXTRA_DISK},bus={{ kvm_disk_bus }}")
+{% endif %}
+
+{% if kvm_cloudinit_ip_config | length > 0 or kvm_cloudinit_user | length > 0 %}
+    # NoCloud cloud-init seed ISO — only built at all because
+    # kvm_cloudinit_ip_config/_user is set; leave both empty (the
+    # default) to skip this whole block and let the template's own
+    # baked-in defaults apply, same "don't clobber a baked-in default
+    # with an empty string" posture as vcenter_customization_domain and
+    # proxmox_cloudinit_ip_config.
+    SEED_DIR=$(mktemp -d)
+
+    cat > "$SEED_DIR/meta-data" <<EOF
+instance-id: {{ vm_name }}
+local-hostname: {{ vm_name }}
+EOF
+
+    cat > "$SEED_DIR/user-data" <<EOF
+#cloud-config
+{% if kvm_cloudinit_user | length > 0 %}
+users:
+  - name: {{ kvm_cloudinit_user }}
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    ssh_authorized_keys:
+{% for key in kvm_cloudinit_sshkeys %}
+      - {{ key }}
+{% endfor %}
+{% endif %}
+EOF
+
+{% if kvm_cloudinit_ip_config | length > 0 %}
+    cat > "$SEED_DIR/network-config" <<EOF
+version: 2
+ethernets:
+  eth0:
+    addresses: [{{ kvm_cloudinit_ip_config }}]
+{% if kvm_cloudinit_nameserver | length > 0 %}
+    nameservers:
+      addresses: [{{ kvm_cloudinit_nameserver }}]
+{% endif %}
+EOF
+{% endif %}
+
+    SEED_ISO="{{ kvm_disk_pool_dir }}/${VM_NAME}-seed.iso"
+    genisoimage -output "$SEED_ISO" -volid cidata -joliet -rock \
+        "$SEED_DIR/user-data" "$SEED_DIR/meta-data"{{ ' "$SEED_DIR/network-config"' if kvm_cloudinit_ip_config | length > 0 else '' }}
+    rm -rf "$SEED_DIR"
+    DISK_ARGS+=(--disk "path=${SEED_ISO},device=cdrom")
+{% endif %}
+
+    virt-install \
+        --connect qemu:///system \
+        --name "$VM_NAME" \
+        --memory {{ vm_memory_mb }} \
+        --vcpus {{ vm_cpu_count }} \
+        --os-variant {{ kvm_os_variant }} \
+        --network "bridge={{ kvm_bridge }},model={{ kvm_network_model }}" \
+        "${DISK_ARGS[@]}" \
+        --import \
+        --noautoconsole \
+        --graphics none
+
+    echo "CHANGED: cloned, configured, and started $VM_NAME"
+fi
+{% endif %}

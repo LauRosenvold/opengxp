@@ -80,6 +80,7 @@ target — see [docs/PROVISIONING.md](docs/PROVISIONING.md) and
 | VMware vCenter | `community.vmware` | 4.5.0 | Not independently pinned — whatever vSphere version that collection release supports; verify against your estate before relying on it |
 | Microsoft Hyper-V | `ansible.windows` | 2.4.0 | Not independently pinned — same caveat |
 | Proxmox VE | `community.proxmox` | 1.3.0 | Not independently pinned — same caveat, see that role's note on verifying the exact module parameter set too |
+| KVM/libvirt | none — plain `virsh`/`qemu-img`/`virt-install` CLI on the KVM host itself, no collection dependency | n/a | Whatever `virsh`/`qemu-img`/`virt-install`/`genisoimage` version the KVM host already has; see `docs/PROVISIONING.md`'s KVM section for why no collection was added |
 
 **Windows infrastructure** (`dns_servers`/`ca_servers` inventory groups —
 see [docs/PKI_DNS.md](docs/PKI_DNS.md)):
@@ -288,16 +289,21 @@ environment differs:
   else in this repo. See [docs/APPS.md](docs/APPS.md)'s `nginx` section.
 - **VM provisioning (`provisioning/vm_provision`) is a fourth tier that
   runs *before* everything above — it creates the VM itself** against
-  vCenter, Hyper-V, or Proxmox VE, before any managed Linux host exists
-  for the rest of this repo to touch. On-prem only (no cloud provider
-  support), and it needs Python libraries on the **control node**
-  (`pyvmomi`, `pywinrm`, `proxmoxer`/`requests`), not a managed target —
-  the first dependency of that kind in this repo. It does not register a
-  newly created host into the checked-in inventory for you; that stays a
-  deliberate, reviewed change. See
-  [docs/PROVISIONING.md](docs/PROVISIONING.md), including why several
-  existing `hosts: all` playbooks changed to exclude `hyperv_hosts` and
-  `localhost`, and why Proxmox VMIDs are never auto-assigned.
+  vCenter, Hyper-V, Proxmox VE, or KVM/libvirt, before any managed Linux
+  host exists for the rest of this repo to touch. On-prem only (no cloud
+  provider support). Three of the four paths need Python libraries on
+  the **control node** (`pyvmomi`, `pywinrm`, `proxmoxer`/`requests`),
+  not a managed target — the first dependency of that kind in this repo;
+  the KVM path needs nothing extra on the control node at all, since it
+  runs `virsh`/`qemu-img`/`virt-install` over plain SSH on the KVM host
+  itself instead. It does not register a newly created host into the
+  checked-in inventory for you; that stays a deliberate, reviewed
+  change. See [docs/PROVISIONING.md](docs/PROVISIONING.md), including
+  why several existing `hosts: all` playbooks changed to exclude
+  `hyperv_hosts` and `localhost` (but deliberately NOT `kvm_hosts` — a
+  KVM host is a normal RHEL/AlmaLinux box this repo's own compliance
+  baseline applies to just fine), and why Proxmox VMIDs are never
+  auto-assigned.
 - **DNS records and Windows-PKI certificates (`provisioning/dns_registration`,
   `provisioning/certificate_enrollment`) connect to Windows over WinRM,
   same as `vm_provision`'s Hyper-V path** — `win_dns_record` for DNS,
@@ -352,6 +358,7 @@ playbooks/
   provision_vm_vcenter.yml     # creates a VM from a vCenter template — runs BEFORE any of the above, see PROVISIONING.md
   provision_vm_hyperv.yml      # creates a VM from a Hyper-V template — runs BEFORE any of the above, see PROVISIONING.md
   provision_vm_proxmox.yml     # creates a VM from a Proxmox VE template — runs BEFORE any of the above, see PROVISIONING.md
+  provision_vm_kvm.yml          # creates a VM on a KVM/libvirt host from a qcow2 template — runs BEFORE any of the above, see PROVISIONING.md
   register_dns.yml             # creates/removes DNS records on a Windows DNS Server — see PKI_DNS.md
   request_certificate.yml      # requests/revokes a certificate from a Windows CA (ADCS) — see PKI_DNS.md
   lvm_storage_grow.yml         # explicitly-gated LV/filesystem grow, --tags grow required
@@ -387,7 +394,7 @@ apps/                           # application deployments on top of server_roles
   registry/                       # Private Docker/OCI registry: native TLS, mandatory htpasswd auth, immutable images by default
   nginx/                          # Standalone containerized nginx: per-vhost static content or reverse proxy, default-deny unmatched Host
 provisioning/                   # creates the VM itself, before any tier above applies — see PROVISIONING.md
-  vm_provision/                    # vCenter (community.vmware), Hyper-V (ansible.windows + PowerShell), or Proxmox VE (community.proxmox), clone from template
+  vm_provision/                    # vCenter (community.vmware), Hyper-V (ansible.windows + PowerShell), Proxmox VE (community.proxmox), or KVM/libvirt (virsh/qemu-img/virt-install over SSH, no collection), clone from template
   dns_registration/                # Windows DNS Server A/CNAME/PTR records via WinRM — see PKI_DNS.md
   certificate_enrollment/          # Windows CA (ADCS) certificate request/revoke via certreq/certutil over WinRM — see PKI_DNS.md
 molecule/
@@ -400,7 +407,7 @@ docs/
   SERVER_ROLES.md                # why server_roles/ is separate from roles/, and per-role specifics
   APPS.md                        # why apps/ is a third tier below server_roles/, plus netbox/registry/nginx specifics
   IDENTITY.md                    # AD/IdM join, SSH/sudo group mapping, ID mapping choice, GSSAPI SSH
-  PROVISIONING.md                # why provisioning/ runs before every other tier, vCenter/Hyper-V/Proxmox specifics
+  PROVISIONING.md                # why provisioning/ runs before every other tier, vCenter/Hyper-V/Proxmox/KVM specifics
   PKI_DNS.md                     # DNS record + Windows-PKI certificate provisioning, why WinRM was chosen
   STORAGE.md                     # fleet-wide LVM layout, safety checks, growing a volume, adding workload-specific mounts
 ```
@@ -417,7 +424,7 @@ ansible-galaxy collection install -r requirements.yml -p collections -f
 **If the VM doesn't exist yet**, create it from a template first — see
 [docs/PROVISIONING.md](docs/PROVISIONING.md) before using any of these
 on anything real (control-node prerequisites, decommission caveats, the
-guest-customization asymmetry across the three hypervisors):
+guest-customization asymmetry across the four hypervisors):
 
 ```bash
 ansible-playbook playbooks/provision_vm_vcenter.yml -i inventories/staging/hosts.yml \
@@ -431,6 +438,11 @@ ansible-playbook playbooks/provision_vm_proxmox.yml -i inventories/staging/hosts
   -e vm_name=app08 -e proxmox_api_host=pve01.gxp.example.internal \
   -e proxmox_node=pve01 -e proxmox_template_vmid=9000 -e proxmox_vmid=180 \
   -e proxmox_storage=local-lvm -e proxmox_bridge=vmbr0
+
+ansible-playbook playbooks/provision_vm_kvm.yml -i inventories/staging/hosts.yml \
+  --limit kvm01.gxp.example.internal -e vm_name=app09 \
+  -e kvm_template_image_path=/var/lib/libvirt/images/templates/rhel9-golden.qcow2 \
+  -e kvm_bridge=br0 -e kvm_os_variant=rhel9.0
 ```
 
 **Give the new host a DNS name** before doing anything else with it —

@@ -1,0 +1,40 @@
+---
+# Creates (or decommissions) a VM on a KVM/libvirt host from a qcow2
+# template image — see docs/PROVISIONING.md for the full lifecycle this
+# fits into (provision -> playbooks/provision_automation_user.yml ->
+# playbooks/site.yml -> whichever server_roles/apps playbooks the new
+# host needs). Runs against the KVM host itself (`kvm_hosts` inventory
+# group, normal SSH) — closer in shape to the Hyper-V path than to
+# vCenter/Proxmox's control-node-to-management-API one, since KVM has no
+# separate management API server the way vSphere/PVE do.
+#
+# No control-node prerequisite (unlike vCenter/pyvmomi, Hyper-V/pywinrm,
+# Proxmox/proxmoxer) — tasks/kvm.yml runs virsh/qemu-img/virt-install on
+# the KVM host itself over plain SSH, nothing extra to install where
+# ansible-playbook runs.
+#
+# --limit is not optional in practice: `kvm_hosts` may contain more than
+# one KVM host, and this creates the VM on whichever host(s) the play
+# actually targets.
+#
+# Usage:
+#   ansible-playbook playbooks/provision_vm_kvm.yml \
+#     -i inventories/staging/hosts.yml --limit kvm01.gxp.example.internal \
+#     -e vm_name=app09 \
+#     -e kvm_template_image_path=/var/lib/libvirt/images/templates/rhel9-golden.qcow2 \
+#     -e kvm_bridge=br0 -e kvm_os_variant=rhel9.0
+#
+# Decommission:
+#   ansible-playbook playbooks/provision_vm_kvm.yml \
+#     -i inventories/staging/hosts.yml --limit kvm01.gxp.example.internal \
+#     -e vm_name=app09 -e vm_state=absent
+
+- name: Provision a VM on a KVM/libvirt host
+  hosts: kvm_hosts
+  become: true
+  vars:
+    provisioning_hypervisor: kvm
+
+  roles:
+    - role: vm_provision
+      tags: [provision, kvm]

@@ -1,9 +1,9 @@
 ---
 # Dispatches purely on provisioning_hypervisor — each of
 # playbooks/provision_vm_vcenter.yml / provision_vm_hyperv.yml /
-# provision_vm_proxmox.yml sets this explicitly at the play level
-# (outranking this role's own default) so running the "wrong" playbook
-# for your hypervisor can't silently do nothing.
+# provision_vm_proxmox.yml / provision_vm_kvm.yml sets this explicitly at
+# the play level (outranking this role's own default) so running the
+# "wrong" playbook for your hypervisor can't silently do nothing.
 
 - name: Provision via vCenter
   ansible.builtin.include_tasks: vcenter.yml
@@ -16,3 +16,7 @@
 - name: Provision via Proxmox VE
   ansible.builtin.include_tasks: proxmox.yml
   when: provisioning_hypervisor == 'proxmox'
+
+- name: Provision via KVM/libvirt
+  ansible.builtin.include_tasks: kvm.yml
+  when: provisioning_hypervisor == 'kvm'

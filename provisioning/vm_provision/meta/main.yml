@@ -5,11 +5,14 @@ galaxy_info:
     Creates (or decommissions) a VM from a template on a hypervisor
     cluster — vCenter (community.vmware.vmware_guest), Hyper-V
     (ansible.windows PowerShell via WinRM, Import-VM -Copy -GenerateNewId
-    from an exported template), or Proxmox VE
-    (community.proxmox.proxmox_kvm against the PVE REST API). Runs
-    against the hypervisor management API/host, not a managed Linux
-    host. Lives in provisioning/, a tier that precedes
-    roles/server_roles/apps entirely — see docs/PROVISIONING.md.
+    from an exported template), Proxmox VE
+    (community.proxmox.proxmox_kvm against the PVE REST API), or
+    KVM/libvirt (a rendered bash script run over normal SSH against the
+    KVM host itself, driving virsh/qemu-img/virt-install — no collection
+    dependency, see tasks/kvm.yml). Runs against the hypervisor
+    management API/host, not a managed Linux host in the usual sense.
+    Lives in provisioning/, a tier that precedes roles/server_roles/apps
+    entirely — see docs/PROVISIONING.md.
   license: Apache-2.0
   min_ansible_version: "2.15"
   platforms:

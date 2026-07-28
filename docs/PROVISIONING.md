@@ -10,21 +10,25 @@ platforms — see [SERVER_ROLES.md](SERVER_ROLES.md)) -> `apps/`
 `provisioning/` sits **before all of them**, not below them. Every other
 tier configures a host that already exists and is reachable over
 SSH. `provisioning/vm_provision` does the opposite: it calls a
-**hypervisor management API** (vCenter, Hyper-V, or Proxmox VE) to
-create the VM in the first place. There is no managed Linux host for
-Ansible to talk to yet — the "target" of this role is vCenter, a
-Hyper-V host, or a Proxmox node, not the new VM itself.
+**hypervisor management API or host** (vCenter, Hyper-V, Proxmox VE, or
+KVM/libvirt) to create the VM in the first place. There is no managed
+Linux host for Ansible to talk to yet — the "target" of this role is
+vCenter, a Hyper-V host, a Proxmox node, or a KVM host, not the new VM
+itself.
 
 That's a different enough kind of automation that it doesn't belong in
 any of the existing tiers:
 
 - It runs from the control node against a management API (vCenter,
-  Proxmox VE) or against the *hypervisor* host via WinRM (Hyper-V) —
-  never via SSH to the thing being created.
-- It needs Python libraries on the **control node** (`pyvmomi`,
-  `pywinrm`, `proxmoxer`/`requests`) rather than packages on a managed
-  target — a first for this repo, worth calling out clearly rather than
-  burying in a role's comments.
+  Proxmox VE), against the *hypervisor* host via WinRM (Hyper-V), or
+  against the *hypervisor* host via normal SSH (KVM/libvirt) — never via
+  SSH to the thing being created.
+- Three of the four paths need Python libraries on the **control node**
+  (`pyvmomi`, `pywinrm`, `proxmoxer`/`requests`) rather than packages on
+  a managed target — a first for this repo, worth calling out clearly
+  rather than burying in a role's comments. The fourth (KVM) needs
+  nothing extra on the control node at all — see the KVM section below
+  for why.
 - Its output feeds the *start* of the lifecycle every other tier assumes
   already happened, not a step within it.
 
@@ -37,7 +41,7 @@ role established for Hyper-V. See [PKI_DNS.md](PKI_DNS.md) for both.
 ## The full lifecycle
 
 ```
-provisioning/vm_provision          create the VM (vCenter, Hyper-V, or Proxmox VE)
+provisioning/vm_provision          create the VM (vCenter, Hyper-V, Proxmox VE, or KVM/libvirt)
         |
         v
 provisioning/dns_registration       give it a resolvable DNS name (see PKI_DNS.md)
@@ -70,11 +74,12 @@ edit; this role doesn't presume to make that change for you.
 
 ## `vm_provision`
 
-One role, three task files (`tasks/vcenter.yml`, `tasks/hyperv.yml`,
-`tasks/proxmox.yml`), dispatched by `provisioning_hypervisor` — set
-explicitly at the play level in each of the three playbooks below rather
-than left to the role's own default, so running the "wrong" playbook for
-your hypervisor can't silently do nothing.
+One role, four task files (`tasks/vcenter.yml`, `tasks/hyperv.yml`,
+`tasks/proxmox.yml`, `tasks/kvm.yml`), dispatched by
+`provisioning_hypervisor` — set explicitly at the play level in each of
+the four playbooks below rather than left to the role's own default, so
+running the "wrong" playbook for your hypervisor can't silently do
+nothing.
 
 ### vCenter — `playbooks/provision_vm_vcenter.yml`
 
@@ -178,12 +183,75 @@ lookup.
 `ansible-playbook` runs — `proxmoxer` is what actually talks to the PVE
 API; the module fails to import without it.
 
+### KVM/libvirt — `playbooks/provision_vm_kvm.yml`
+
+Architecturally closer to the Hyper-V path than to vCenter/Proxmox's
+management-API one: KVM has no separate management server the way
+vSphere/PVE do, so this connects to an inventory host in the `kvm_hosts`
+group over **normal SSH** (not WinRM) and runs a rendered bash script on
+the KVM host itself — `virsh`/`qemu-img`/`virt-install` doing the actual
+work, same "no clean idempotent Ansible module exists for this, so a
+script does it and Ansible ships/runs/reports it" reasoning as the
+Hyper-V PowerShell script. `community.libvirt` was deliberately not
+added as a dependency: it has no `vmware_guest`/`proxmox_kvm` equivalent
+either (no single module clones-with-customization), so it would only
+wrap the same `virsh`-equivalent calls in a Python-bindings requirement
+— and that requirement would land on the **managed KVM host itself**,
+not just the control node, unlike every other hypervisor path's
+prerequisite here.
+
+**No control-node prerequisite at all** — unlike `pyvmomi`/`pywinrm`/
+`proxmoxer`, nothing needs installing wherever `ansible-playbook` runs.
+The KVM host does need `virsh`, `qemu-img`, and `virt-install` (and, only
+if you use cloud-init customization below, `genisoimage`) already
+present — standard tooling on any real KVM hypervisor, which this role
+assumes rather than installs, same posture as Hyper-V assuming
+`Import-VM`/`Get-VM` already exist.
+
+**Template is a qcow2 image, cloned via a backing file.** Unlike
+vCenter/Proxmox's template-by-name-or-VMID clone, `kvm_template_image_path`
+points at a qcow2 base image; each new VM's boot disk is
+`qemu-img create -f qcow2 -F qcow2 -b <template>` — a full independent
+copy is NOT created (this is a backing-file/COW clone, closer in spirit
+to Proxmox's *linked* clone than its default full clone) that inherits
+the template's own virtual disk size exactly, never resized by this
+role. `vm_extra_disk_gb`, same as every other hypervisor path, creates a
+genuinely separate additional disk, not a resize of the boot disk.
+
+**Guest customization via a generated cloud-init seed ISO**, only if
+`kvm_cloudinit_ip_config` or `kvm_cloudinit_user` is set — the script
+builds a NoCloud `user-data`/`meta-data`/`network-config` set and packs
+it into an ISO with `genisoimage` on the fly (nothing pre-baked into the
+template the way Proxmox's cloud-init drive has to be). Leave both empty
+to skip this entirely and let the template's own defaults apply, same
+posture as `vcenter_customization_domain`/`proxmox_cloudinit_ip_config`.
+
+**Best-effort guest IP lookup**, via `virsh domifaddr --source agent` —
+requires `qemu-guest-agent` installed and running in the guest (a decent
+template should already carry it). Same "may not be up yet, check
+directly" posture as the Hyper-V/Proxmox IP lookups.
+
+**`kvm_hosts` is deliberately NOT excluded from `hosts: all` playbooks**,
+unlike `hyperv_hosts`/`dns_servers`/`ca_servers` (see "The `localhost`
+inventory entry" below for that exclusion mechanism). Those three are excluded because they're
+Windows hosts this repo's Linux-only compliance-baseline roles simply
+can't run against; a KVM host is a normal RHEL/AlmaLinux box those roles
+work on just fine. The default here is therefore the *opposite* of
+Hyper-V's: a `kvm_hosts` member gets `playbooks/site.yml`'s full
+CIS-hardening/audit baseline like any other fleet host, on the reasoning
+that "more compliance coverage by default" is the safer failure mode for
+a GxP posture than quietly carving out an unreviewed exemption. If you'd
+rather treat your KVM layer as out-of-scope infrastructure the way
+vCenter/Proxmox/Hyper-V are here, add your own exclusion — this repo
+doesn't make that call for you.
+
 ## Decommissioning (`vm_state: absent`)
 
-All three hypervisor paths support removing a VM — power off (Hyper-V:
+All four hypervisor paths support removing a VM — power off (Hyper-V:
 `Stop-VM -TurnOff -Force`; vCenter: `force: true` on the delete call;
-Proxmox: `force: true` stops then deletes) and delete its disks. This is
-a genuinely destructive, hard-to-reverse action; nothing about
+Proxmox: `force: true` stops then deletes; KVM: `virsh destroy` then
+`virsh undefine --remove-all-storage`) and delete its disks. This is a
+genuinely destructive, hard-to-reverse action; nothing about
 `vm_state: absent` prompts for confirmation beyond what running the
 playbook itself already implies, so treat it with the same care as `git
 reset --hard` or dropping a database table — confirm you have the right
@@ -213,16 +281,16 @@ Satellite-register, or AD-join whatever machine happens to be running
 ## What's intentionally out of scope
 
 - **Cloud providers** (AWS/Azure/GCP/etc.) — this was specifically asked
-  for as on-prem vCenter, Hyper-V, and Proxmox VE; a cloud provisioning
-  path is a different set of collections/modules (and IAM/credential
-  model) entirely, not a small extension of this role.
-- **Building or maintaining the golden template itself** — all three
-  paths assume a template (vCenter, Proxmox) or exported template VM
-  (Hyper-V) already exists and is kept current (patched, hardened
-  baseline pre-applied if you want a head start, correct guest
-  tools/cloud-init installed). Template lifecycle — how often it's
-  rebuilt, from what, by whom — is a separate, real process this repo
-  doesn't attempt to own.
+  for as on-prem vCenter, Hyper-V, Proxmox VE, and KVM/libvirt; a cloud
+  provisioning path is a different set of collections/modules (and
+  IAM/credential model) entirely, not a small extension of this role.
+- **Building or maintaining the golden template itself** — all four
+  paths assume a template (vCenter, Proxmox), exported template VM
+  (Hyper-V), or qcow2 base image (KVM) already exists and is kept
+  current (patched, hardened baseline pre-applied if you want a head
+  start, correct guest tools/cloud-init installed). Template lifecycle —
+  how often it's rebuilt, from what, by whom — is a separate, real
+  process this repo doesn't attempt to own.
 - **Automatic inventory registration** — see "The full lifecycle" above;
   folding a newly created host into the checked-in inventory is a
   deliberate, separate, reviewed change.
