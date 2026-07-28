@@ -1,0 +1,44 @@
+---
+# CANONICAL COPY LIVES IN inventories/production/group_vars/file_share_hosts.yml
+# See the note in staging/group_vars/rhel9.yml — same rule applies here.
+#
+# Runs server_roles/file_share_server (see playbooks/file_share_server.yml
+# — NOT part of playbooks/site.yml). A TEMPORARY file server — the
+# age-based cleanup in server_roles/file_share_server/defaults/main.yml
+# is on by default. This is transient working storage, not a GxP record
+# repository; if regulated data ever transits a host in this group,
+# treat retention/deletion as a control decision your validation
+# package needs to own explicitly, not something to inherit silently
+# from the default 30-day window below.
+#
+# Zone-wide open within roles/firewalld_baseline's default-deny zone,
+# not source-restricted — same documented gap as dbservers/mssql_hosts
+# (see docs/SERVER_ROLES.md). NFSv4-only means just one port for NFS (no
+# rpcbind/mountd dynamic ports); keep this in sync if you ever add
+# NFSv3 support yourself. SMB's 137-138/udp+139/tcp are NetBIOS
+# (nmb) — drop them if you don't need legacy network browsing and only
+# ever connect by hostname/IP.
+firewalld_rules:
+  - { port: "445/tcp" }         # SMB
+  - { port: "139/tcp" }         # NetBIOS session (nmb) — legacy browsing/compat
+  - { port: "137-138/udp" }     # NetBIOS name/datagram (nmb)
+  - { port: "2049/tcp" }        # NFSv4
+
+# --- Shares ------------------------------------------------------------------
+# Empty by default — server_roles/file_share_server installs and
+# configures nothing until you populate this. Example:
+# file_share_shares:
+#   - name: dropbox
+#     path: /srv/shares/dropbox
+#     protocols: [smb, nfs]
+#     retention_days: 14
+#     smb_valid_users: ["alice", "bob"]
+#     nfs_allowed_hosts: ["10.20.10.0/24"]
+
+# --- Samba users ---------------------------------------------------------------
+# Fails loudly if any share uses "smb" and this is empty — supply via an
+# ansible-vault encrypted group_vars/host_vars file, e.g.
+# inventories/staging/group_vars/file_share_hosts.vault.yml:
+#   file_share_smb_users:
+#     - { username: "alice", password: "{{ vault_file_share_alice_password }}" }
+#     - { username: "bob", password: "{{ vault_file_share_bob_password }}" }

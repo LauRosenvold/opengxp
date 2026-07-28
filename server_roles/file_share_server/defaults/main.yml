@@ -1,0 +1,72 @@
+---
+# Turns a hardened RHEL9/RHEL10/AlmaLinux9/AlmaLinux10 host into a
+# TEMPORARY file share server — Samba (SMB) and/or NFS, both from the
+# OS's own packaged samba/nfs-utils (no separate content source the way
+# PGDG/Microsoft's repos are for the database roles — this rides
+# whatever roles/patch_management already keeps current). "Temporary" is
+# the operative word: file_share_cleanup_enabled (on by default) purges
+# files older than a retention window, per share. This role assumes
+# transient working storage, NOT a GxP record repository — if regulated
+# data ever transits this host, retention/deletion is a control decision
+# your validation package needs to own explicitly, not something to
+# accept the default for silently. See docs/SERVER_ROLES.md.
+
+# --- Protocols ------------------------------------------------------------------
+file_share_smb_enabled: true
+file_share_nfs_enabled: true
+
+# --- Shares ------------------------------------------------------------------
+# One entry per share; each is exposed over SMB, NFS, or both. Empty by
+# default — this role creates and installs nothing until you define at
+# least one (tasks/main.yml fails loudly otherwise).
+#
+#   file_share_shares:
+#     - name: dropbox                    # required — SMB share name and NFS export path segment
+#       path: /srv/shares/dropbox         # required — the actual directory on disk
+#       protocols: [smb, nfs]             # required — non-empty subset of [smb, nfs]
+#       read_only: false                  # optional, default false
+#       retention_days: 30                # optional — overrides file_share_cleanup_default_retention_days; 0 = never auto-purge this share
+#       smb_valid_users: ["alice", "bob"] # required if "smb" in protocols — usernames from file_share_smb_users below
+#       nfs_allowed_hosts: ["10.20.10.0/24"]  # required if "nfs" in protocols — CIDRs/hosts allowed to mount; no "export to everyone" default
+file_share_shares: []
+
+# --- Cleanup (age-based purge — "temporary" is the whole point of this role) ----
+file_share_cleanup_enabled: true
+file_share_cleanup_cron: "30 2 * * *"   # daily, off-hours
+file_share_cleanup_default_retention_days: 30   # used for any share that doesn't set its own retention_days
+
+# --- Filesystem ------------------------------------------------------------------
+# Share directory ownership — force_user/force_group in smb.conf and the
+# NFS root_squash mapping both funnel through this one identity, so
+# files written by different SMB users or different NFS clients land
+# with consistent, predictable ownership rather than each client's own
+# (and possibly colliding) UID/GID.
+file_share_owner: root
+file_share_group: root
+
+# --- Samba (SMB) ---------------------------------------------------------------
+file_share_smb_workgroup: "WORKGROUP"
+file_share_smb_server_string: "%h temporary file server"
+file_share_smb_min_protocol: "SMB2"     # reject SMB1 outright — long-deprecated, insecure
+file_share_smb_encrypt: "required"      # SMB3 transport encryption — mandatory, not opportunistic, same "secure by default" posture as this repo's other TLS toggles
+# Local Samba accounts (independent of any OS login — Samba keeps its
+# own password database via smbpasswd). No default: an empty list means
+# every SMB share this role would otherwise create is unreachable,
+# matching apps/registry's "mandatory auth, fail loudly rather than
+# allow anonymous access" posture. Passwords vaulted, never plaintext in
+# a real inventory.
+file_share_smb_users: []
+# Example:
+#   - { username: "alice", password: "{{ vault_file_share_alice_password }}" }
+
+# --- NFS -------------------------------------------------------------------------
+# NFSv4 only, deliberately — no rpcbind/mountd dynamic-port juggling to
+# open through firewalld the way NFSv3 needs (a single 2049/tcp is
+# enough), and no separate statd/lockd services to manage either.
+file_share_nfs_domain: "gxp.example.internal"   # must match /etc/idmapd.conf's Domain on every NFSv4 client too, or UID/GID mapping silently falls back to "nobody"
+# NFS traffic is NOT encrypted, and sec=sys (host/IP-based trust only,
+# no real client authentication) is what nfs_allowed_hosts per share
+# actually gates — not a strong guarantee against a spoofed source
+# address on a network you don't otherwise trust. Kerberos (sec=krb5p,
+# real encryption + authentication) is a documented gap, not wired up
+# here — see docs/SERVER_ROLES.md.

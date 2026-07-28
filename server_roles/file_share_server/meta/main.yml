@@ -1,0 +1,18 @@
+---
+galaxy_info:
+  role_name: file_share_server
+  description: >-
+    Temporary file share server — Samba (SMB2/3 only, mandatory
+    transport encryption, mandatory authentication, no guest access)
+    and/or NFSv4 (no NFSv3, host/CIDR-restricted per share, sec=sys
+    only — Kerberos is a documented gap), both from OS-packaged
+    samba/nfs-utils. Age-based automatic cleanup on by default (the
+    "temporary" in the name) — not a GxP record repository. Runs
+    against the `file_share_hosts` inventory group. Lives in
+    server_roles/, not roles/ — see docs/SERVER_ROLES.md.
+  license: Apache-2.0
+  min_ansible_version: "2.15"
+  platforms:
+    - name: EL
+      versions: ["9", "10"]
+dependencies: []

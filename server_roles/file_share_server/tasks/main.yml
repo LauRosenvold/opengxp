@@ -1,0 +1,85 @@
+---
+# Order matters, same principle as this repo's other server_roles:
+# share directories (with correct ownership/SELinux context) before
+# either protocol is configured to serve them, protocols before
+# scheduling cleanup against paths that need to already exist.
+
+- name: Fail loudly if no shares are defined
+  ansible.builtin.assert:
+    that:
+      - file_share_shares | length > 0
+    fail_msg: >-
+      file_share_shares is empty — this role creates and installs
+      nothing until you define at least one. See defaults/main.yml for
+      the shape.
+
+- name: Fail loudly if any share has an invalid or missing protocol list
+  ansible.builtin.assert:
+    that:
+      - item.protocols is defined
+      - item.protocols | length > 0
+      - item.protocols | difference(['smb', 'nfs']) | length == 0
+    fail_msg: >-
+      file_share_shares entry "{{ item.name | default('(missing name)') }}"
+      has an empty or invalid protocols list — must be a non-empty
+      subset of ["smb", "nfs"].
+  loop: "{{ file_share_shares }}"
+  loop_control:
+    label: "{{ item.name | default('(missing name)') }}"
+
+- name: Fail loudly if an SMB share has no valid_users
+  ansible.builtin.assert:
+    that:
+      - item.smb_valid_users is defined
+      - item.smb_valid_users | length > 0
+    fail_msg: >-
+      file_share_shares entry "{{ item.name }}" lists "smb" in
+      protocols but has no smb_valid_users — this role always requires
+      authentication, never guest/anonymous access.
+  loop: "{{ file_share_shares }}"
+  loop_control:
+    label: "{{ item.name | default('(missing name)') }}"
+  when: "'smb' in item.protocols"
+
+- name: Fail loudly if an NFS share has no nfs_allowed_hosts
+  ansible.builtin.assert:
+    that:
+      - item.nfs_allowed_hosts is defined
+      - item.nfs_allowed_hosts | length > 0
+    fail_msg: >-
+      file_share_shares entry "{{ item.name }}" lists "nfs" in
+      protocols but has no nfs_allowed_hosts — empty would export to
+      nobody usefully, and this role fails loudly rather than silently
+      exporting to "*" (everyone).
+  loop: "{{ file_share_shares }}"
+  loop_control:
+    label: "{{ item.name | default('(missing name)') }}"
+  when: "'nfs' in item.protocols"
+
+- name: Fail loudly if SMB is enabled but no users are configured
+  ansible.builtin.assert:
+    that:
+      - file_share_smb_users | length > 0
+    fail_msg: >-
+      file_share_smb_enabled is true but file_share_smb_users is empty —
+      this role always requires authentication, populate it with at
+      least one {username, password} pair.
+  when: file_share_smb_enabled | bool
+
+- name: Create share directories
+  ansible.builtin.include_tasks: shares.yml
+  tags: [prep]
+
+- name: Configure Samba (SMB)
+  ansible.builtin.include_tasks: smb.yml
+  tags: [smb]
+  when: file_share_smb_enabled | bool
+
+- name: Configure NFS
+  ansible.builtin.include_tasks: nfs.yml
+  tags: [nfs]
+  when: file_share_nfs_enabled | bool
+
+- name: Configure automatic cleanup
+  ansible.builtin.include_tasks: cleanup.yml
+  tags: [cleanup]

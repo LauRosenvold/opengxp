@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# {{ ansible_managed | default('Managed by Ansible — server_roles/file_share_server') }}
+# Deletes files older than each share's own retention window —
+# permanently, no recovery mechanism. The entire reason this role
+# exists ("temporary" file server). A share with retention_days: 0 is
+# skipped entirely (kept forever, your responsibility to manage). This
+# does NOT distinguish GxP-relevant data from anything else in a share —
+# see docs/SERVER_ROLES.md before pointing this at anything you can't
+# afford to lose after its window.
+
+set -euo pipefail
+
+{% for share in file_share_shares %}
+{% set retention = share.retention_days | default(file_share_cleanup_default_retention_days) %}
+{% if retention | int > 0 %}
+logger -t file-share-cleanup "Purging {{ share.name }}: files older than {{ retention }} days"
+find "{{ share.path }}" -mindepth 1 -type f -mtime +{{ retention }} -print -delete >> /var/log/file-share-cleanup.log 2>&1
+find "{{ share.path }}" -mindepth 1 -type d -empty -delete >> /var/log/file-share-cleanup.log 2>&1
+{% endif %}
+{% endfor %}
+
+logger -t file-share-cleanup "Cleanup run complete"

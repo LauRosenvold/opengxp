@@ -1,0 +1,51 @@
+---
+- name: Deploy the cleanup wrapper script
+  ansible.builtin.template:
+    src: cleanup.sh.j2
+    dest: /usr/local/sbin/file-share-cleanup.sh
+    owner: root
+    group: root
+    mode: "0750"
+  when: file_share_cleanup_enabled | bool
+
+- name: Schedule periodic cleanup
+  ansible.builtin.template:
+    src: cleanup_cron.j2
+    dest: /etc/cron.d/file-share-cleanup
+    owner: root
+    group: root
+    mode: "0644"
+  when: file_share_cleanup_enabled | bool
+
+- name: Remove cleanup artifacts if disabled
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /usr/local/sbin/file-share-cleanup.sh
+    - /etc/cron.d/file-share-cleanup
+  when: not (file_share_cleanup_enabled | bool)
+
+- name: Warn that automatic cleanup is enabled
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: file_share_cleanup_enabled is true on
+      {{ inventory_hostname }} — files older than each share's own
+      retention window (default
+      {{ file_share_cleanup_default_retention_days }} days) are deleted
+      automatically and permanently, with no recovery mechanism. This
+      role assumes transient working storage, NOT a GxP record
+      repository — if regulated data ever transits this host,
+      retention/deletion is a control decision your validation package
+      needs to own explicitly. See docs/SERVER_ROLES.md.
+  when: file_share_cleanup_enabled | bool
+
+- name: Warn that automatic cleanup is off
+  ansible.builtin.debug:
+    msg: >-
+      NOTE: file_share_cleanup_enabled is false for
+      {{ inventory_hostname }} — nothing purges old files automatically.
+      Fine if you have another retention mechanism, but this is
+      supposed to be a TEMPORARY file server; monitor disk usage
+      yourself if you're relying on manual cleanup instead.
+  when: not (file_share_cleanup_enabled | bool)

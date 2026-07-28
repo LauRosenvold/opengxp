@@ -1,0 +1,37 @@
+---
+- name: Create each share's directory
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ file_share_owner }}"
+    group: "{{ file_share_group }}"
+    mode: "{{ '0750' if item.read_only | default(false) else '0770' }}"
+  loop: "{{ file_share_shares }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Set the SELinux file context for each share
+  community.general.sefcontext:
+    target: "{{ item.path }}(/.*)?"
+    setype: "{{ 'public_content_t' if item.read_only | default(false) else 'public_content_rw_t' }}"
+    state: present
+  loop: "{{ file_share_shares }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: file_share_sefcontext_result
+  # public_content_t/_rw_t is the SELinux type specifically designed to
+  # be shared across nfsd/smbd/httpd/vsftpd, which is what lets one
+  # directory be labeled once and served over EITHER protocol (or both)
+  # without needing samba_share_t specifically, and without reaching for
+  # the blunt "allow all" nfs_export_all_rw/ro booleans this role
+  # deliberately avoids. Verify against your installed SELinux policy
+  # version if a share still gets AVC denials — `ausearch -m avc -ts
+  # recent` on this host is the first thing to check.
+
+- name: Apply the SELinux context to files already on disk
+  ansible.builtin.command: "restorecon -R -v {{ item.item.path }}"
+  loop: "{{ file_share_sefcontext_result.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  when: item.changed
+  changed_when: true

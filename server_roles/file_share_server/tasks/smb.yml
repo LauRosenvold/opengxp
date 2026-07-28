@@ -1,0 +1,61 @@
+---
+- name: Install Samba
+  ansible.builtin.dnf:
+    name:
+      - samba
+      - samba-common
+      - samba-client
+    state: present
+
+- name: Deploy smb.conf
+  ansible.builtin.template:
+    src: smb.conf.j2
+    dest: /etc/samba/smb.conf
+    owner: root
+    group: root
+    mode: "0644"
+    validate: "testparm -s %s"
+  notify: Restart smb
+
+- name: Check which configured Samba users already exist in the Samba password database
+  ansible.builtin.command: "pdbedit -L -u {{ item.username }}"
+  register: file_share_smb_user_check
+  loop: "{{ file_share_smb_users }}"
+  loop_control:
+    label: "{{ item.username }}"
+  changed_when: false
+  failed_when: false
+  no_log: true
+
+- name: Create OS accounts for Samba users that need one (no login shell, Samba auth only)
+  ansible.builtin.user:
+    name: "{{ item.username }}"
+    system: true
+    shell: /sbin/nologin
+    create_home: false
+    state: present
+  loop: "{{ file_share_smb_users }}"
+  loop_control:
+    label: "{{ item.username }}"
+
+- name: Set each Samba user's password (only for accounts not already in the Samba password database)
+  ansible.builtin.shell: |
+    set -o pipefail
+    printf '%s\n%s\n' "{{ item.item.password }}" "{{ item.item.password }}" | smbpasswd -s -a {{ item.item.username }}
+  args:
+    executable: /bin/bash
+  loop: "{{ file_share_smb_user_check.results }}"
+  loop_control:
+    label: "{{ item.item.username }}"
+  when: item.rc != 0
+  changed_when: true
+  no_log: true   # stdin/command carries the password
+
+- name: Ensure smb/nmb are enabled and running
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    state: started
+    enabled: true
+  loop:
+    - smb
+    - nmb

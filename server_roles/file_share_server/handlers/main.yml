@@ -1,0 +1,19 @@
+---
+- name: Restart smb
+  ansible.builtin.systemd:
+    name: smb
+    state: restarted
+
+- name: Restart nfs-idmapd
+  ansible.builtin.systemd:
+    name: nfs-idmapd
+    state: restarted
+
+- name: Restart nfs-server
+  ansible.builtin.systemd:
+    name: nfs-server
+    state: restarted
+
+- name: Re-export NFS shares
+  ansible.builtin.command: exportfs -ra
+  changed_when: true

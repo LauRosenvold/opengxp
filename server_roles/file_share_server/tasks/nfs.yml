@@ -1,0 +1,42 @@
+---
+- name: Install NFS utilities
+  ansible.builtin.dnf:
+    name: nfs-utils
+    state: present
+
+- name: Set the NFSv4 domain
+  ansible.builtin.lineinfile:
+    path: /etc/idmapd.conf
+    regexp: "^#?\\s*Domain\\s*="
+    line: "Domain = {{ file_share_nfs_domain }}"
+  notify: Restart nfs-idmapd
+
+- name: Ensure NFSv3 is disabled (this role is NFSv4-only, see defaults/main.yml)
+  ansible.builtin.blockinfile:
+    path: /etc/nfs.conf
+    marker: "# {mark} ANSIBLE MANAGED BLOCK - server_roles/file_share_server"
+    block: |
+      [nfsd]
+      vers3=n
+  # A separate, clearly-marked [nfsd] block appended to the file rather
+  # than patching any existing one in place — nfs-utils' own config
+  # parser handles a repeated section by merging/overriding, but verify
+  # against your installed nfs-utils version if NFSv3 doesn't actually
+  # end up disabled (`rpcinfo -p localhost` shouldn't list nfs version 3
+  # once this takes effect and the service has restarted).
+  notify: Restart nfs-server
+
+- name: Deploy /etc/exports
+  ansible.builtin.template:
+    src: exports.j2
+    dest: /etc/exports
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Re-export NFS shares
+
+- name: Ensure nfs-server is enabled and running
+  ansible.builtin.systemd:
+    name: nfs-server
+    state: started
+    enabled: true

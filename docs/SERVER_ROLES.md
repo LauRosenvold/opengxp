@@ -713,3 +713,107 @@ external etcd is Kubernetes, use `kubernetes_node`'s own option instead
 - **A Kubernetes control plane pointed at this cluster** — see the
   comparison table above; use `kubernetes_node`'s own
   `k8s_external_etcd_enabled` option for that instead.
+
+## `file_share_server`
+
+A **temporary** SMB/NFS file share server — Samba and/or NFSv4, both
+from OS-packaged `samba`/`nfs-utils` (no separate content source, this
+one rides whatever `roles/patch_management` already keeps current). Run
+via `playbooks/file_share_server.yml` against the `file_share_hosts`
+inventory group. "Temporary" is not a figure of speech: age-based
+automatic cleanup (`file_share_cleanup_enabled`) is **on by default**,
+deleting files older than a per-share retention window permanently,
+with no recovery mechanism. This role assumes transient working
+storage — if regulated data ever transits a host in this group,
+retention/deletion is a control decision your validation package needs
+to own explicitly, not something to inherit silently from the default
+30-day window.
+
+### Shares, concretely
+
+Everything is driven by `file_share_shares`, a flat list — one entry
+per share, each independently exposed over SMB, NFS, or both:
+
+```yaml
+file_share_shares:
+  - name: dropbox
+    path: /srv/shares/dropbox
+    protocols: [smb, nfs]
+    retention_days: 14                      # optional; 0 = never auto-purge; omit to use file_share_cleanup_default_retention_days
+    smb_valid_users: ["alice", "bob"]        # required if "smb" in protocols
+    nfs_allowed_hosts: ["10.20.10.0/24"]     # required if "nfs" in protocols
+```
+
+`tasks/main.yml` fails loudly up front on an empty `file_share_shares`,
+an invalid/missing `protocols` list, an SMB share with no
+`smb_valid_users`, or an NFS share with no `nfs_allowed_hosts` — there
+is no "export to everyone" or "share with no auth" default anywhere in
+this role.
+
+### Things that are NOT obvious and will bite you if skipped
+
+- **Both protocols require authentication, always — no guest/anonymous
+  access.** SMB uses its own local password database
+  (`file_share_smb_users`, independent of any OS login — accounts get
+  `/sbin/nologin` and exist purely for `smbpasswd` auth); NFS uses
+  `sec=sys` (see below) gated by `nfs_allowed_hosts` per share. An empty
+  `file_share_smb_users` with any SMB share configured fails the run
+  loudly, same "mandatory auth" posture as `apps/registry`.
+- **NFS is v4-only, deliberately, and each share is its own independent
+  pseudo-root (`fsid=N`), not nested under one shared `fsid=0` tree.**
+  No NFSv3, so no rpcbind/mountd dynamic ports to open through
+  firewalld — just `2049/tcp`. `file_share_nfs_domain` must match every
+  NFSv4 client's own `/etc/idmapd.conf` `Domain` setting, or UID/GID
+  mapping silently falls back to `nobody` instead of failing loudly (an
+  NFS client-side limitation this role can't fix from the server side).
+- **NFS traffic is not encrypted, and `sec=sys` is host/IP-based trust,
+  not real client authentication.** `nfs_allowed_hosts` restricts by
+  source address, which is what actually gates access — not a strong
+  guarantee against a spoofed source on a network you don't otherwise
+  trust. Kerberos (`sec=krb5p`, real encryption + authentication) is a
+  documented gap, not wired up here.
+- **SMB, by contrast, has mandatory SMB3 transport encryption
+  (`smb encrypt = required`, not opportunistic) and rejects SMB1
+  outright** (`min protocol version = SMB2`) — the two protocols this
+  role wires up land in noticeably different places on the
+  security spectrum; don't assume NFS shares get the same protections
+  SMB shares do.
+- **SELinux stays enforcing** (same posture as every other
+  `server_roles/` entry) **via `public_content_t`/`public_content_rw_t`
+  labeling** (`tasks/shares.yml`, `community.general.sefcontext` +
+  `restorecon`), not the blunt `nfs_export_all_rw`/`ro` "allow
+  everything" booleans. This is also what lets one directory be served
+  over *either* protocol (or both) with a single, consistent label
+  rather than needing Samba-specific and NFS-specific contexts to
+  coexist. If a share still hits an AVC denial, `ausearch -m avc -ts
+  recent` on that host is the first thing to check — this wasn't
+  exhaustively tested against every SELinux policy version across
+  `k8s_supported_versions`-style ranges the way some of this repo's
+  other content is.
+- **Cleanup does not distinguish GxP-relevant data from anything else
+  in a share.** `retention_days` is per-share and blunt — everything
+  older than the window goes, permanently, on the schedule in
+  `file_share_cleanup_cron`. Set `retention_days: 0` on any share that
+  needs to be exempt, deliberately, rather than assuming the default
+  30-day window is conservative enough for what ends up there.
+- **Firewalld access is zone-wide, not source-restricted**, same
+  documented gap as every other `server_roles/` group — `nfs_allowed_hosts`/
+  `smb_valid_users` are the actual access controls; firewalld here is a
+  coarser, host-level backstop, not a per-share network boundary.
+
+### What's intentionally out of scope
+
+- **Active Directory-integrated SMB auth (`security = ads`), Kerberos
+  for either protocol** — local Samba accounts and `sec=sys` NFS only.
+  If you already have `roles/identity_sssd` joined to a domain on this
+  host, integrating that with Samba/NFS auth is a deliberate, separate
+  exercise this role doesn't attempt.
+- **NFSv3, for legacy clients that can't do v4** — a documented,
+  deliberate gap (see above), not an oversight.
+- **Quota enforcement, per-user disk usage limits** — `retention_days`
+  bounds how long files live, not how much any one user can store while
+  they're there.
+- **Replication, high availability, or any backup of share content
+  beyond the retention window itself** — this is explicitly temporary,
+  working storage; if something in a share needs to survive, that's a
+  separate, deliberate copy to somewhere else, not this role's job.

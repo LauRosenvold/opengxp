@@ -102,6 +102,7 @@ see [docs/PKI_DNS.md](docs/PKI_DNS.md)):
 | Microsoft SQL Server | 2019, 2022 (`mssql_supported_versions`, enumerated — see [docs/SERVER_ROLES.md](docs/SERVER_ROLES.md) for why this can't go open-ended the way PostgreSQL does); **EL9 only**, RHEL10/AlmaLinux10 not yet Microsoft-certified | `mssql_version` in `inventories/<env>/group_vars/mssql_hosts.yml` (default `2022`) |
 | etcd (standalone, `server_roles/etcd_cluster`) | 3.5.17 | `etcd_version` in `inventories/<env>/group_vars/etcd_hosts.yml`; pinned to a specific upstream GitHub release, checksum-verified via `etcd_release_sha256` — not a distro package |
 | Docker CE | latest from the distro-appropriate `docker-ce` repo | not independently version-pinned — tracks whatever that repo currently ships |
+| Samba / nfs-utils (`server_roles/file_share_server`) | latest from the OS's own repos | not independently version-pinned, same posture as Docker CE above — no separate content source, rides `roles/patch_management` |
 
 **Application container images** (`apps/`):
 
@@ -230,6 +231,19 @@ environment differs:
   etcd. See [docs/SERVER_ROLES.md](docs/SERVER_ROLES.md)'s
   `etcd_cluster` section, including its comparison table against the
   `kubernetes_node` option.
+- **`server_roles/file_share_server` is a TEMPORARY SMB/NFS file
+  server — age-based automatic cleanup is on by default, not opt-in.**
+  Files older than each share's own retention window (30 days unless
+  overridden) are deleted permanently, with no recovery mechanism; this
+  is transient working storage, not a GxP record repository. Both
+  protocols always require authentication (no guest/anonymous access
+  anywhere), SMB gets mandatory SMB3 transport encryption, and NFS is
+  v4-only with no rpcbind/mountd — but NFS itself is never encrypted
+  (`sec=sys`, host/IP trust only; Kerberos is a documented gap). SELinux
+  stays enforcing via `public_content_t`/`public_content_rw_t` file
+  labeling, not the blunt `nfs_export_all_rw` boolean. See
+  [docs/SERVER_ROLES.md](docs/SERVER_ROLES.md)'s `file_share_server`
+  section before using this on anything real.
 - **Application deployments (NetBox, a private registry, standalone
   nginx, ...) live in `apps/`, a third tier below `server_roles/`.** An
   application runs *on top of* a `server_roles/` platform (e.g.
@@ -309,6 +323,7 @@ playbooks/
   postgresql_server.yml        # workload enablement, NOT part of site.yml
   mssql_server.yml             # workload enablement, NOT part of site.yml
   etcd_cluster.yml             # workload enablement, NOT part of site.yml — standalone etcd, no Kubernetes involved
+  file_share_server.yml        # workload enablement, NOT part of site.yml — temporary SMB/NFS file server, cleanup on by default
   netbox.yml                   # application deployment, NOT part of site.yml — see APPS.md
   registry.yml                 # application deployment, NOT part of site.yml — see APPS.md
   nginx.yml                    # application deployment, NOT part of site.yml — see APPS.md
@@ -343,6 +358,7 @@ server_roles/                  # workload enablement — separate change-control
   postgresql_server/               # PGDG PostgreSQL, pgAudit, TLS, basic primary/replica streaming replication
   mssql_server/                     # Microsoft SQL Server (mssql-server RPM), SQL Server Audit, TLS, EL9 only — see SERVER_ROLES.md
   etcd_cluster/                      # standalone etcd (pinned upstream binary release, no Kubernetes tooling), mutual TLS — see SERVER_ROLES.md
+  file_share_server/                  # temporary SMB/NFSv4 file server, mandatory auth on both, age-based auto-cleanup on by default — see SERVER_ROLES.md
 apps/                           # application deployments on top of server_roles/ — separate again, see APPS.md
   netbox/                         # NetBox Docker Compose stack: nginx TLS proxy, external-DB-recommended, containerized Redis
   registry/                       # Private Docker/OCI registry: native TLS, mandatory htpasswd auth, immutable images by default
@@ -527,6 +543,15 @@ until you supply them):
 
 ```bash
 ansible-playbook playbooks/etcd_cluster.yml -i inventories/staging/hosts.yml --check --diff
+```
+
+Stand up a temporary SMB/NFS file server (`file_share_hosts` group;
+read [docs/SERVER_ROLES.md](docs/SERVER_ROLES.md) first — age-based
+cleanup is on by default, and `file_share_shares` is empty until you
+define at least one share):
+
+```bash
+ansible-playbook playbooks/file_share_server.yml -i inventories/staging/hosts.yml --check --diff
 ```
 
 Deploy NetBox on top of an already-provisioned Docker host (`netbox_hosts`

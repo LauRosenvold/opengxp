@@ -1,0 +1,14 @@
+# {{ ansible_managed | default('Managed by Ansible — server_roles/file_share_server') }}
+# NFSv4 only (see defaults/main.yml) — each share gets its own
+# independent fsid=N pseudo-root (no shared fsid=0 parent needed for
+# unrelated directory trees), so clients mount each one directly by its
+# real path, e.g. `mount -t nfs4 {{ ansible_fqdn | default(inventory_hostname) }}:/srv/shares/dropbox /mnt/dropbox`.
+# sec=sys only (host/IP trust, no real authentication) — see
+# defaults/main.yml's nfs_allowed_hosts comment for the caveat.
+{% for share in file_share_shares %}
+{% if 'nfs' in share.protocols %}
+{% set share_fsid = loop.index %}
+{{ share.path }}{% for host in share.nfs_allowed_hosts %} {{ host }}(fsid={{ share_fsid }},{{ 'ro' if share.read_only | default(false) else 'rw' }},sync,no_subtree_check,root_squash,sec=sys){% endfor %}
+
+{% endif %}
+{% endfor %}
