@@ -1,0 +1,211 @@
+---
+# GENERATED FILE — do not hand-edit.
+#
+# Built from ServiceNow CMDB by tools/generate_inventory_from_cmdb.py
+# (mapping: tools/cmdb_mapping.yml) at {{ generated_at }}.
+# Source query for this environment: {{ source_query }}
+#
+# Hand edits here survive only until the next regeneration, which will
+# silently overwrite them — fix the CMDB record or tools/cmdb_mapping.yml
+# instead, then re-run the script. Review the resulting `git diff` and
+# send it through the normal PR flow (docs/CHANGE_CONTROL.md) like any
+# other inventory change; this script does not commit anything itself.
+#
+{{ preamble }}
+#
+# Every host must land in exactly one OS group (rhel9 / rhel10 /
+# almalinux9 / almalinux10) and exactly one GxP tier group (gxp_critical /
+# gxp_standard), UNLESS it's tagged into hyperv_hosts/dns_servers/
+# ca_servers (Windows/WinRM-only, see those groups below) — the generator
+# enforces this from the CMDB fields, it isn't just a convention here.
+# Functional groups (webservers/appservers/dbservers) drive
+# roles/firewalld_baseline's per-service port list — add new functional
+# groups there and in roles/firewalld_baseline/defaults/main.yml together,
+# then teach tools/cmdb_mapping.yml's KNOWN_GROUPS about the new name.
+#
+# almalinux9 uses the same ansible-lockdown.RHEL9-CIS engine as rhel9 (see
+# inventories/{{ env }}/group_vars/almalinux9.yml); almalinux10 shares the
+# same el10_baseline_hardening CIS fallback as rhel10 (see
+# inventories/{{ env }}/group_vars/almalinux10.yml). Neither is folded
+# into its rhel counterpart group, so an inventory listing always tells
+# you the real OS/support vendor at a glance without having to
+# cross-reference ansible_distribution.
+
+all:
+  vars:
+    # Must match automation_user_name in group_vars/all.yml. This account
+    # doesn't exist on a host until playbooks/provision_automation_user.yml
+    # has run against it once — see roles/automation_user. No playbook in
+    # this repo ever connects as root. Not CMDB-derived — static for every
+    # environment.
+    ansible_user: svc_ansible
+    ansible_become: true
+
+  hosts:
+    # Explicit (not Ansible's ad-hoc "implicit localhost") specifically so
+    # group_vars/all.yml reliably applies to it — playbooks/
+    # provision_vm_vcenter.yml (see docs/PROVISIONING.md) runs against
+    # this, and vCenter connection vars live in group_vars/all.yml like
+    # everything else environment-specific. Not CMDB-derived.
+    localhost:
+      ansible_connection: local
+      ansible_become: false
+
+  children:
+    rhel9:
+      hosts:
+{{ render_hosts(groups.get("rhel9", [])) }}
+
+    rhel10:
+      hosts:
+{{ render_hosts(groups.get("rhel10", [])) }}
+
+    almalinux10:
+      hosts:
+{{ render_hosts(groups.get("almalinux10", [])) }}
+
+    almalinux9:
+      hosts:
+{{ render_hosts(groups.get("almalinux9", [])) }}
+
+    gxp_critical:
+      # Systems in scope for GMP/GLP/GCP record integrity: MES, LIMS,
+      # historian, e-signature-bearing app servers, their DB backends.
+      # Stricter session timeout, audit set, and patch window apply (see
+      # inventories/{{ env }}/group_vars/gxp_critical.yml).
+      hosts:
+{{ render_hosts(groups.get("gxp_critical", [])) }}
+
+    gxp_standard:
+      # Everything else in the regulated estate that isn't itself a
+      # source of GxP records (jump hosts, internal tooling, CI runners).
+      hosts:
+{{ render_hosts(groups.get("gxp_standard", [])) }}
+
+    webservers:
+      hosts:
+{{ render_hosts(groups.get("webservers", [])) }}
+    appservers:
+      hosts:
+{{ render_hosts(groups.get("appservers", [])) }}
+    dbservers:
+      hosts:
+{{ render_hosts(groups.get("dbservers", [])) }}
+
+    mssql_hosts:
+      # A separate database-engine group from dbservers — runs
+      # server_roles/mssql_server (see playbooks/mssql_server.yml), not
+      # postgresql_server. See the note in group_vars/dbservers.yml. NOT
+      # part of playbooks/site.yml.
+      hosts:
+{{ render_hosts(groups.get("mssql_hosts", [])) }}
+
+    etcd_hosts:
+      # A standalone etcd cluster (server_roles/etcd_cluster, see
+      # playbooks/etcd_cluster.yml) — plain upstream etcd, no Kubernetes
+      # tooling. Completely separate from k8s_nodes' own k8s_etcd child
+      # group below — don't mix hosts between the two groups. NOT part of
+      # playbooks/site.yml. HOST ORDER MATTERS: the first host listed is
+      # where the cluster CA gets generated before being distributed —
+      # this comes from the CMDB's order field (tools/cmdb_mapping.yml),
+      # not alphabetical sort.
+      hosts:
+{{ render_hosts(groups.get("etcd_hosts", []), ordered=true) }}
+
+    file_share_hosts:
+      # A temporary SMB/NFS file share server (server_roles/
+      # file_share_server, see playbooks/file_share_server.yml) —
+      # transient working storage, not a GxP record repository (see
+      # group_vars/file_share_hosts.yml and docs/SERVER_ROLES.md). NOT
+      # part of playbooks/site.yml.
+      hosts:
+{{ render_hosts(groups.get("file_share_hosts", [])) }}
+
+    docker_hosts:
+      # Cross-cutting, like the functional groups above: a host is also in
+      # rhel9/rhel10/almalinux9/almalinux10 and gxp_critical/gxp_standard.
+      # Runs server_roles/docker_host (see playbooks/docker_host.yml) —
+      # NOT part of playbooks/site.yml. See docs/SERVER_ROLES.md.
+      hosts:
+{{ render_hosts(groups.get("docker_hosts", [])) }}
+
+    k8s_nodes:
+      # Parent group for shared vars (inventories/{{ env }}/group_vars/
+      # k8s_nodes.yml) — control-plane/worker-specific vars go in the
+      # respective child group_vars file instead. Runs
+      # server_roles/kubernetes_node (see playbooks/kubernetes_cluster.yml)
+      # — NOT part of playbooks/site.yml. See docs/SERVER_ROLES.md. Never
+      # assign a host directly to k8s_nodes in the CMDB — it has no
+      # `hosts:` of its own, only the three children below.
+      children:
+        k8s_control_plane:
+          # First host listed is the one that runs `kubeadm init` — order
+          # matters here in a way it doesn't for any other group in this
+          # file. A single host is a valid (non-HA) control plane; more
+          # than one requires k8s_control_plane_endpoint to be set (see
+          # group_vars/k8s_control_plane.yml). Order comes from the
+          # CMDB's order field, not alphabetical sort.
+          hosts:
+{{ render_hosts(groups.get("k8s_control_plane", []), ordered=true, indent=12) }}
+        k8s_workers:
+          hosts:
+{{ render_hosts(groups.get("k8s_workers", []), indent=12) }}
+        k8s_etcd:
+          # Empty (and irrelevant) unless k8s_external_etcd_enabled is
+          # also set true in group_vars/k8s_nodes.yml. HOST ORDER MATTERS
+          # the same way it does for k8s_control_plane above — it's the
+          # one the etcd CA gets generated on before being distributed.
+          hosts:
+{{ render_hosts(groups.get("k8s_etcd", []), ordered=true, indent=12) }}
+
+    netbox_hosts:
+      # An application layer (apps/netbox, see playbooks/netbox.yml),
+      # deployed ON TOP of a Docker host, not an alternative to it — every
+      # host here should ALSO be in docker_hosts above (playbooks/
+      # docker_host.yml must have already run against it). NOT part of
+      # playbooks/site.yml. See docs/APPS.md.
+      hosts:
+{{ render_hosts(groups.get("netbox_hosts", [])) }}
+
+    registry_hosts:
+      # Another application layer (apps/registry, see
+      # playbooks/registry.yml) — same rule as netbox_hosts: every host
+      # here should ALSO be in docker_hosts.
+      hosts:
+{{ render_hosts(groups.get("registry_hosts", [])) }}
+
+    nginx_hosts:
+      # A third application layer (apps/nginx, see playbooks/nginx.yml)
+      # — same rule as netbox_hosts/registry_hosts: every host here
+      # should ALSO be in docker_hosts.
+      hosts:
+{{ render_hosts(groups.get("nginx_hosts", [])) }}
+
+    hyperv_hosts:
+      # Windows Hyper-V hosts, connected via WinRM — not a RHEL/AlmaLinux
+      # target this repo's roles/ baseline applies to at all (see
+      # docs/PROVISIONING.md), and exempt from the os_group/gxp_tier
+      # requirement above. Every "hosts: all" playbook in playbooks/
+      # explicitly excludes this group along with dns_servers/ca_servers
+      # below (`hosts: all:!hyperv_hosts:!dns_servers:!ca_servers`).
+      hosts:
+{{ render_hosts(groups.get("hyperv_hosts", [])) }}
+
+    dns_servers:
+      # Windows DNS Server(s), same Windows-exempt posture as
+      # hyperv_hosts above — see docs/PKI_DNS.md.
+      hosts:
+{{ render_hosts(groups.get("dns_servers", [])) }}
+
+    ca_servers:
+      # Windows CA(s) (Active Directory Certificate Services), same
+      # Windows-exempt posture as hyperv_hosts/dns_servers above — see
+      # docs/PKI_DNS.md.
+      hosts:
+{{ render_hosts(groups.get("ca_servers", [])) }}
+
+{{ footer }}
+# Keep the group *names* above identical to what every group_vars file in
+# this directory is keyed on. If tools/cmdb_mapping.yml's KNOWN_GROUPS
+# list ever needs a new name, add it there and in the corresponding
+# group_vars file together.

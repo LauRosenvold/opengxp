@@ -1,0 +1,79 @@
+---
+# Field mapping between this repo's fixed Ansible group names (see the
+# header/footer comments in inventories/production/hosts.yml) and your
+# ServiceNow CMDB's actual table/field/value names. Committed as-is — no
+# secrets live here. Credentials for the CMDB itself come from environment
+# variables read by tools/generate_inventory_from_cmdb.py (SN_INSTANCE,
+# SN_USERNAME, SN_PASSWORD), never from this file. See docs/CMDB_INVENTORY.md.
+#
+# Everything marked CHANGEME must be filled in by someone who knows this
+# org's ServiceNow schema before the script will run — it refuses to fetch
+# anything while a CHANGEME remains, rather than silently querying the
+# wrong field.
+
+# CMDB table to query. cmdb_ci_server is the out-of-box parent table for
+# both Linux and Windows CIs; narrow to cmdb_ci_linux_server if your
+# instance keeps Windows hosts (hyperv/dns/ca) in a separate table you'd
+# rather query separately (the script only supports one table per run).
+table: cmdb_ci_server
+
+fields:
+  # ServiceNow field holding the FQDN/hostname to use as the Ansible
+  # inventory hostname (the key under a group's `hosts:` map).
+  hostname: CHANGEME  # e.g. fqdn
+
+  # Field whose value identifies the OS. Required for every host EXCEPT
+  # ones tagged into hyperv_hosts/dns_servers/ca_servers via
+  # ansible_groups below (those are Windows/WinRM-only and never get an
+  # os_group per hosts.yml's documented exception).
+  os_group: CHANGEME  # e.g. u_ansible_os_group
+
+  # Field whose value identifies GxP tier. Same "required unless
+  # Windows-exempt" rule as os_group.
+  gxp_tier: CHANGEME  # e.g. u_gxp_tier
+
+  # Field holding a delimited list of any OTHER groups this host belongs
+  # to (functional groups like webservers/dbservers, workload groups like
+  # docker_hosts/mssql_hosts, app-layer groups like netbox_hosts, the
+  # k8s_control_plane/k8s_workers/k8s_etcd trio, or the Windows exception
+  # groups hyperv_hosts/dns_servers/ca_servers). Every value must resolve
+  # to one of the group names KNOWN_GROUPS lists in the script — anything
+  # else is a hard error, not a silently-dropped value.
+  ansible_groups: CHANGEME  # e.g. u_ansible_groups
+
+  # Optional integer/order field. Only meaningful for k8s_control_plane,
+  # k8s_etcd, and etcd_hosts, where host ORDER is load-bearing (first host
+  # is where kubeadm init / the etcd CA runs — see hosts.yml's footer
+  # note). Leave as CHANGEME and the script will still run, but any host
+  # placed in one of those three groups without an order value gets a
+  # loud warning instead of a silent, possibly-wrong guess.
+  order: CHANGEME  # e.g. u_ansible_order
+
+# Delimiter used within the ansible_groups field's raw string value.
+delimiter: ","
+
+# Raw CMDB field values -> this repo's fixed group names. Left side is
+# whatever your CMDB actually contains (a choice-list value, a category
+# name, whatever); right side must be spelled exactly like the group name
+# inventories/*/group_vars/*.yml is keyed on.
+os_group_values:
+  CHANGEME_rhel9_value: rhel9
+  CHANGEME_rhel10_value: rhel10
+  CHANGEME_almalinux9_value: almalinux9
+  CHANGEME_almalinux10_value: almalinux10
+
+gxp_tier_values:
+  CHANGEME_critical_value: gxp_critical
+  CHANGEME_standard_value: gxp_standard
+
+# Per-environment ServiceNow sysparm_query filter (encoded query string —
+# build it with the CMDB list view's filter builder, then "Copy query" to
+# get this exact syntax). This is what separates production/staging/
+# validation hosts when they all live in one CMDB. Adjust the field name
+# to whatever your org actually uses to record environment/lifecycle
+# state; operational_status=1 below is the out-of-box "Operational" value,
+# keep or drop it as fits your process.
+environments:
+  production: "CHANGEME_environment_field=production^operational_status=1"
+  staging: "CHANGEME_environment_field=staging^operational_status=1"
+  validation: "CHANGEME_environment_field=validation^operational_status=1"

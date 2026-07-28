@@ -1,0 +1,6 @@
+# Control-node-only Python dependencies for tools/generate_inventory_from_cmdb.py
+# — same category as the pyvmomi/pywinrm/proxmoxer control-node deps noted
+# in requirements.yml. Not needed on any managed target host.
+requests>=2.31
+PyYAML>=6.0
+Jinja2>=3.1
