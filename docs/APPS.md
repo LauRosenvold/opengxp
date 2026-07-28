@@ -304,9 +304,21 @@ registries directly:
 | `docker_registry_mirrors` | `server_roles/docker_host` | Configures dockerd to try this registry as a pull-through mirror before `docker.io` |
 | `docker_trusted_registry_cas` | `server_roles/docker_host` | Trusts this registry's TLS cert on every Docker host that needs it (see the `registry` caveats above) |
 | `netbox_image` | `apps/netbox` | Point at `<registry_hostname>/netboxcommunity/netbox:<tag>` once you've mirrored it |
+| `nginx_image` | `apps/nginx` | Same pattern as `netbox_image` |
 | `k8s_repo_baseurl` / `containerd_repo_baseurl` / `crio_repo_baseurl` | `server_roles/kubernetes_node` | RPM repos, not container images — a different kind of mirroring (Satellite, not this registry), listed here only so you don't confuse the two content-source mechanisms |
 
 None of this rewiring happens automatically — every role above still
 defaults to its own public source until you deliberately change it,
 consistent with every other "off/public until you configure otherwise"
 default in this repo.
+
+**Doing the actual mirroring**: `tools/sync_images_with_skopeo.py` copies
+the images named in `tools/image_pins.yml` (`netbox_image` and its
+sidecar images, `nginx_image`, `k8s_pause_image`) into this registry with
+skopeo, digest preserved end to end — `resolve` locks each tag to the raw
+manifest digest it currently resolves to (written to
+`tools/image_pins.lock.yml`, reviewed like a `requirements.yml` pin bump),
+then `sync` copies that exact digest in and verifies the pushed manifest
+matches before calling it done. `registry_image`/`registry_ui_image`
+above are deliberately excluded from that pin list — see the note at the
+top of `apps/registry/defaults/main.yml` for why.

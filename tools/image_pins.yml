@@ -1,0 +1,86 @@
+---
+# Container images mirrored into apps/registry via
+# tools/sync_images_with_skopeo.py, manifest-digest preserved end to end.
+#
+# This file declares WHAT to mirror (source + tag) and is hand-maintained
+# — edit it freely, it's just data plus comments. The exact digest each
+# tag resolves to lives in tools/image_pins.lock.yml instead, which
+# `sync_images_with_skopeo.py resolve` generates for you. Never hand-edit
+# the lock file. Same manifest/lockfile split in spirit as any package
+# manager's dependency file + lockfile — and the same discipline as
+# requirements.yml: a digest change is a change-controlled event (see
+# docs/CHANGE_CONTROL.md's "Version pinning discipline"), reviewed as a
+# diff to the lock file, not resolved silently at sync time.
+#
+# Workflow:
+#   1. Add/edit an entry below (source/tag/dest_repo).
+#   2. Run `python tools/sync_images_with_skopeo.py resolve` — looks up
+#      the raw manifest digest for each tag upstream (recomputed from the
+#      raw manifest bytes, so it's correct for multi-arch manifest lists
+#      too, not just single-platform images) and writes/updates
+#      tools/image_pins.lock.yml. resolve never touches the registry.
+#   3. Review the lock file diff — a changed digest for an unchanged tag
+#      means upstream repointed the tag, which is exactly the kind of
+#      thing a GxP reviewer needs to see and approve. Commit, PR.
+#   4. Run `python tools/sync_images_with_skopeo.py sync` — copies each
+#      locked digest into the registry (`--multi-arch all`, so manifest
+#      lists come across whole) and verifies the pushed manifest's own
+#      digest matches before considering it done. Refuses to run if the
+#      lock file is missing an entry, or a tag in this file has moved
+#      since the last resolve.
+#
+# registry_image / registry_ui_image (apps/registry/defaults/main.yml)
+# are deliberately NOT listed here — apps/registry is what this file
+# mirrors INTO, so those two stay on docker.io directly. That's the
+# documented chicken-and-egg exception; see the comment at the top of
+# apps/registry/defaults/main.yml.
+
+registry:
+  # Must match apps/registry's registry_hostname var.
+  hostname: CHANGEME
+
+  # Path to a directory holding the registry's CA cert, so skopeo trusts
+  # its TLS — same purpose as docker_trusted_registry_cas in
+  # server_roles/docker_host/defaults/main.yml. Required unless
+  # apps/registry's registry_ssl_cert_src is a publicly-trusted cert
+  # (the default is self-signed). Leave null only once that's true.
+  cert_dir: null
+
+  # Skip TLS verification against the registry entirely. Same
+  # "discouraged escape hatch" posture as docker_insecure_registries in
+  # server_roles/docker_host/defaults/main.yml — fix cert_dir instead of
+  # reaching for this.
+  insecure: false
+
+images:
+  # apps/netbox's netbox_image
+  - name: netbox
+    source: docker.io/netboxcommunity/netbox
+    tag: "v4.1-3.0.2"
+    dest_repo: netboxcommunity/netbox
+
+  # apps/netbox's netbox_redis_image
+  - name: netbox_redis
+    source: docker.io/redis
+    tag: "7-alpine"
+    dest_repo: redis
+
+  # apps/netbox's netbox_postgres_image (only relevant when
+  # netbox_external_database_enabled is false)
+  - name: netbox_postgres
+    source: docker.io/postgres
+    tag: "16-alpine"
+    dest_repo: postgres
+
+  # Shared by apps/netbox's netbox_nginx_image AND apps/nginx's
+  # nginx_image — same upstream image/tag, one mirrored copy.
+  - name: nginx_unprivileged
+    source: docker.io/nginxinc/nginx-unprivileged
+    tag: "1.27-alpine"
+    dest_repo: nginxinc/nginx-unprivileged
+
+  # server_roles/kubernetes_node's k8s_pause_image
+  - name: k8s_pause
+    source: registry.k8s.io/pause
+    tag: "3.10"
+    dest_repo: pause
